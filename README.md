@@ -1,4 +1,4 @@
-Convenciones de Git
+LÉEME
 
 Ramas: main (estable) → develop (integración) → feature/x-microservicio (trabajo individual)
 Flujo: cada persona trabaja en su rama feature/, y hace Pull Request hacia develop cuando su parte funciona.
