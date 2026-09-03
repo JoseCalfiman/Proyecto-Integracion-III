@@ -1,0 +1,5 @@
+# Dependencias del microservicio de Optimización
+prophet>=1.1.0
+pandas>=2.0.0
+numpy>=1.24.0
+pytest>=8.0.0
