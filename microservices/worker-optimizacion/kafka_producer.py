@@ -1,16 +1,8 @@
-"""Publica un resumen con los datos de la recomendación en el tópico
-``optimization.reports``. La recomendación describe cuánto se ahorraría
-apagando equipos no críticos en horas de alto costo, según la predicción
-de gasto eléctrico generada con Prophet.
-"""
 from __future__ import annotations
-
 import json
 import os
 from typing import Any
-
 from confluent_kafka import Producer
-
 from ahorro import Action, calcular_ahorro_action
 
 REPORT_TOPIC = os.getenv("KAFKA_REPORT_TOPIC", "optimization.reports")
@@ -43,16 +35,6 @@ ACTIONS = [
 
 
 def build_recommendation() -> dict[str, Any]:
-    """Construye el resumen de la recomendación a publicar.
-
-    Aplica las acciones definidas en ``ACTIONS`` y calcula el ahorro
-    potencial en CLP con :func:`calcular_ahorro_action`.
-
-    Returns:
-        Diccionario con los datos de la recomendación: fecha objetivo,
-        costo estimado del kWh, gasto proyectado, ahorro estimado y
-        equipos sugeridos a apagar.
-    """
     recommendations: list[dict[str, Any]] = []
     total_savings = 0.0
 
@@ -80,9 +62,8 @@ def build_recommendation() -> dict[str, Any]:
         "recommendations": recommendations,
     }
 
-
+"""Callback de entrega de Confluent Kafka."""
 def on_delivery(err, msg) -> None:
-    """Callback de entrega de Confluent Kafka."""
     if err is not None:
         print(f"[kafka_producer] error al publicar en {msg.topic()}: {err}")
         return
@@ -91,27 +72,15 @@ def on_delivery(err, msg) -> None:
         f"particion {msg.partition()} offset {msg.offset()}"
     )
 
-
 def build_producer() -> Producer:
     return Producer({"bootstrap.servers": BOOTSTRAP_SERVERS})
-
 
 def publish_report(
     report: dict[str, Any],
     producer: Producer | None = None,
     topic: str = REPORT_TOPIC,
 ) -> Producer:
-    """Publica el resumen de la recomendación en ``optimization.reports``.
 
-    Args:
-        report: Diccionario con los datos de la recomendación
-            (ver :func:`build_recommendation`).
-        producer: Productor ya construido; si es None se crea uno nuevo.
-        topic: Tópico destino (por defecto ``optimization.reports``).
-
-    Returns:
-        El productor usado, con el mensaje encolado para su envío.
-    """
     if producer is None:
         producer = build_producer()
 
@@ -120,13 +89,11 @@ def publish_report(
     producer.poll(0)
     return producer
 
-
+"""Encola y envía un mensaje de prueba con datos de ejemplo."""
 def main() -> None:
-    """Encola y envía un mensaje de prueba con datos de ejemplo."""
     producer = publish_report(build_recommendation())
     producer.flush()
     print(f"[kafka_producer] flush completado en {REPORT_TOPIC}")
-
 
 if __name__ == "__main__":
     main()
