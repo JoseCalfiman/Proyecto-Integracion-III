@@ -1,0 +1,100 @@
+networks:
+  frigorifico-net:
+    driver: bridge
+
+services:
+  #Broker MQTT
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+    networks:
+      - frigorifico-net
+
+  #Kafka
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    networks:
+      - frigorifico-net
+
+  #TimescaleDB
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    networks:
+      - frigorifico-net
+
+  #Microservicio de ingesta
+  ingesta:
+    build: ./services/ingesta
+    container_name: ingesta
+    env_file:
+      - .env
+    ports:
+      - "8001:8000"
+    depends_on:
+      - mosquitto
+      - kafka
+      - timescaledb
+    networks:
+      - frigorifico-net
+
+  #Worker predictivo
+  worker-predictivo:
+    build: ./services/worker-predictivo
+    container_name: worker-predictivo
+    env_file:
+      - .env
+    depends_on:
+      - kafka
+      - timescaledb
+    networks:
+      - frigorifico-net
+
+  #Worker HACCP
+  worker-haccp:
+    build: ./services/worker-haccp
+    container_name: worker-haccp
+    env_file:
+      - .env
+    depends_on:
+      - kafka
+      - timescaledb
+    networks:
+      - frigorifico-net
+
+  #Worker optimización
+  worker-optimizacion:
+    build: ./services/worker-optimizacion
+    container_name: worker-optimizacion
+    env_file:
+      - .env
+    depends_on:
+      - kafka
+      - timescaledb
+    networks:
+      - frigorifico-net
+
+  #Dashboard
+  dashboard:
+    build: ./services/dashboard
+    container_name: dashboard
+    env_file:
+      - .env
+    ports:
+      - "8501:8501"
+    depends_on:
+      - ingesta
+      - timescaledb
+    networks:
+      - frigorifico-net
