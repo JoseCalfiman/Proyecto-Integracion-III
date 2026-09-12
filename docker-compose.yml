@@ -9,6 +9,10 @@ services:
     container_name: mosquitto
     ports:
       - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/pwfile:/mosquitto/config/pwfile:ro
+      - ./mosquitto/acl.conf:/mosquitto/config/acl.conf:ro
     networks:
       - frigorifico-net
 
