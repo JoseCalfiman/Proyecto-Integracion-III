@@ -23,6 +23,12 @@ def _normalize_rule(rule: Optional[dict[str, Any]]) -> dict[str, Any]:
     normalized = DEFAULT_HACCP_RULE.copy()
     if rule:
         normalized.update(rule)
+        if "absolute_max_temp" in rule:
+            normalized["max_temp_c"] = float(rule["absolute_max_temp"])
+        if "absolute_min_temp" in rule:
+            normalized["min_temp_c"] = float(rule["absolute_min_temp"])
+        if "tolerance_time_min" in rule:
+            normalized["warning_duration_seconds"] = float(rule["tolerance_time_min"]) * 60
     return normalized
 
 
@@ -42,8 +48,11 @@ def evaluate_temperature_rule(
     critical_seconds = float(active_rule["critical_duration_seconds"])
     critical_temp = float(active_rule.get("critical_temp_c", max_temp))
 
-    is_over_limit = float(temperature_c) > max_temp
-    is_alert = is_over_limit and float(duration_seconds) >= warning_seconds
+    min_temp = active_rule.get("min_temp_c")
+    is_out_of_limit = float(temperature_c) > max_temp or (
+        min_temp is not None and float(temperature_c) < float(min_temp)
+    )
+    is_alert = is_out_of_limit and float(duration_seconds) >= warning_seconds
 
     if is_alert:
         if float(temperature_c) >= critical_temp or float(duration_seconds) >= critical_seconds:
@@ -54,7 +63,7 @@ def evaluate_temperature_rule(
             f"Alerta HACCP: temperatura {temperature_c}°C supera el límite de "
             f"{max_temp}°C durante {duration_seconds} segundos."
         )
-    elif is_over_limit:
+    elif is_out_of_limit:
         severity = "warning"
         message = (
             f"Temperatura fuera de rango: {temperature_c}°C, pero aún no supera "
@@ -91,6 +100,7 @@ def evaluate_temperature_series(
     """
     active_rule = _normalize_rule(rule)
     max_temp = float(active_rule["max_temp_c"])
+    min_temp = active_rule.get("min_temp_c")
     warning_seconds = float(active_rule["warning_duration_seconds"])
     sample_interval = int(sample_interval_seconds or active_rule.get("sample_interval_seconds", 10))
 
@@ -109,7 +119,7 @@ def evaluate_temperature_series(
     current_run: List[float] = []
 
     for value in values:
-        if value > max_temp:
+        if value > max_temp or (min_temp is not None and value < float(min_temp)):
             current_run.append(value)
         elif current_run:
             run_duration = (len(current_run) + 1) * sample_interval

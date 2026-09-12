@@ -1,3 +1,3 @@
 # Dependencias del microservicio HACCP
-# Sin librerías externas requeridas para la lógica base del validador.
+SQLAlchemy>=2.0,<3.0
 pytest>=8.0.0
