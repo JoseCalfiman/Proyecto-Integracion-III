@@ -6,7 +6,7 @@ identificar alertas por riesgo de cadena de frío.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Optional
+from typing import Any, Iterable, List, Mapping, Optional
 
 DEFAULT_HACCP_RULE = {
     "name": "cold_chain_temperature",
@@ -16,6 +16,53 @@ DEFAULT_HACCP_RULE = {
     "critical_temp_c": 6.0,
     "sample_interval_seconds": 10,
 }
+
+
+def _get_value(source: Mapping[str, Any] | Any, name: str) -> Any:
+    if isinstance(source, Mapping):
+        return source.get(name)
+    return getattr(source, name, None)
+
+
+def validar_haccp(
+    alerta_predictiva: Mapping[str, Any] | Any,
+    regla_camara: Mapping[str, Any] | Any,
+) -> bool:
+    """Indica si una alerta predictiva incumple la regla de su cámara.
+
+    Cada cámara aporta sus propios límites mediante ``regla_camara``. Se
+    considera incumplimiento cuando la temperatura prevista supera el máximo
+    absoluto o cuando el tiempo restante previsto es menor que la tolerancia.
+    """
+    if _get_value(regla_camara, "is_active") is False:
+        return False
+
+    temperature = _get_value(alerta_predictiva, "temperature")
+    if temperature is None:
+        temperature = _get_value(alerta_predictiva, "projected_temperature")
+    if temperature is None:
+        temperature = _get_value(alerta_predictiva, "temperature_c")
+    remaining_time_min = _get_value(alerta_predictiva, "remaining_time_min")
+    absolute_max_temp = _get_value(regla_camara, "absolute_max_temp")
+    tolerance_time_min = _get_value(regla_camara, "tolerance_time_min")
+
+    actual_missing = [
+        name
+        for name, value in (
+            ("temperature/projected_temperature", temperature),
+            ("remaining_time_min", remaining_time_min),
+            ("absolute_max_temp", absolute_max_temp),
+            ("tolerance_time_min", tolerance_time_min),
+        )
+        if value is None
+    ]
+    if actual_missing:
+        raise ValueError(f"Faltan campos HACCP: {', '.join(actual_missing)}")
+
+    return (
+        float(temperature) > float(absolute_max_temp)
+        or float(remaining_time_min) < float(tolerance_time_min)
+    )
 
 
 def _normalize_rule(rule: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -172,6 +219,7 @@ def evaluate_temperature_series(
 
 __all__ = [
     "DEFAULT_HACCP_RULE",
+    "validar_haccp",
     "evaluate_temperature_rule",
     "evaluate_temperature_series",
 ]

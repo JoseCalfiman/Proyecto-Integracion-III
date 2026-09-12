@@ -22,6 +22,11 @@ cámara que todavía no tenga una regla. Es idempotente y conserva las reglas
 existentes. La función debe ejecutarse después de que existan las cámaras y
 las tablas `chambers`, `users` y `haccp_rules`.
 
+`validar_haccp(alerta_predictiva, regla_camara)` devuelve `True` cuando la
+temperatura prevista supera `absolute_max_temp` o cuando
+`remaining_time_min` es menor que `tolerance_time_min`. La regla se recibe
+como argumento para que cada cámara pueda tener límites diferentes.
+
 
 
 ├── worker-haccp/                  # Worker HACCP y Alertas (Eduardo)
