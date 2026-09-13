@@ -1,122 +1,102 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'; // browserRouter para manejar la navegación en la aplicación, Routes para definir las rutas y Route para cada ruta individual. Navigate se utiliza para redirigir a los usuarios no autenticados a la página de login.
+import { AuthProvider } from './context/AuthContext'; // use AuthProvider para envolver la aplicación y proporcionar el contexto de autenticación a todos los componentes.
+import { useAuth } from './hooks/useAuth'; // useAuth importado para acceder al contexto de autenticación y verificar si el usuario está autenticado y su rol.
+import Login from './pages/Login';
+import Layout from './components/layout/Layout';
 
-function App() {
-  const [count, setCount] = useState(0)
+// Páginas del Gerente
+import GerenteDashboard from './pages/gerente/Dashboard';
+import GerenteAlertas from './pages/gerente/Alertas';
+import GerenteAhorro from './pages/gerente/Ahorro';
+import GerenteChatIA from './pages/gerente/ChatIA';
+import GerenteCamaras from './pages/gerente/Camaras';
+import GerenteHACCP from './pages/gerente/HACCP';
+import GerenteUsuarios from './pages/gerente/Usuarios';
+import GerenteHistorial from './pages/gerente/Historial';
+
+// Páginas del Técnico
+import TecnicoDashboard from './pages/tecnico/Dashboard';
+import TecnicoAlertas from './pages/tecnico/Alertas';
+import TecnicoChatIA from './pages/tecnico/ChatIA';
+import TecnicoHACCP from './pages/tecnico/HACCP';
+import TecnicoPanel from './pages/tecnico/PanelTecnico';
+import TecnicoHistorial from './pages/tecnico/Historial';
+
+// Página compartida
+import Soporte from './pages/Soporte';
+
+// ============================================================
+// RUTA PROTEGIDA
+// ============================================================
+const ProtectedRoute = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-gray-500">Cargando...</div>
+      </div>
+    );
+  }
+
+  return isAuthenticated ? children : <Navigate to="/login" />;
+};
+
+// ============================================================
+// RUTAS SEGÚN EL ROL
+// ============================================================
+const AppRoutes = () => {
+  const { user } = useAuth();
+  const rol = user?.rol;
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <Routes>
+      <Route path="/login" element={<Login />} />
 
-      <div className="ticks"></div>
+      {/* Rutas del Gerente */}
+      {rol === 'gerente' && (
+        <>
+          <Route path="/" element={<ProtectedRoute><Layout><GerenteDashboard /></Layout></ProtectedRoute>} />
+          <Route path="/alertas" element={<ProtectedRoute><Layout><GerenteAlertas /></Layout></ProtectedRoute>} />
+          <Route path="/ahorro" element={<ProtectedRoute><Layout><GerenteAhorro /></Layout></ProtectedRoute>} />
+          <Route path="/chat-ia" element={<ProtectedRoute><Layout><GerenteChatIA /></Layout></ProtectedRoute>} />
+          <Route path="/camaras" element={<ProtectedRoute><Layout><GerenteCamaras /></Layout></ProtectedRoute>} />
+          <Route path="/haccp" element={<ProtectedRoute><Layout><GerenteHACCP /></Layout></ProtectedRoute>} />
+          <Route path="/usuarios" element={<ProtectedRoute><Layout><GerenteUsuarios /></Layout></ProtectedRoute>} />
+          <Route path="/historial" element={<ProtectedRoute><Layout><GerenteHistorial /></Layout></ProtectedRoute>} />
+        </>
+      )}
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      {/* Rutas del Técnico */}
+      {rol === 'tecnico' && (
+        <>
+          <Route path="/" element={<ProtectedRoute><Layout><TecnicoDashboard /></Layout></ProtectedRoute>} />
+          <Route path="/alertas" element={<ProtectedRoute><Layout><TecnicoAlertas /></Layout></ProtectedRoute>} />
+          <Route path="/chat-ia" element={<ProtectedRoute><Layout><TecnicoChatIA /></Layout></ProtectedRoute>} />
+          <Route path="/haccp" element={<ProtectedRoute><Layout><TecnicoHACCP /></Layout></ProtectedRoute>} />
+          <Route path="/panel-tecnico" element={<ProtectedRoute><Layout><TecnicoPanel /></Layout></ProtectedRoute>} />
+          <Route path="/historial" element={<ProtectedRoute><Layout><TecnicoHistorial /></Layout></ProtectedRoute>} />
+        </>
+      )}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      {/* Ruta compartida */}
+      <Route path="/soporte" element={<ProtectedRoute><Layout><Soporte /></Layout></ProtectedRoute>} />
+
+      {/* Redirección por defecto */}
+      <Route path="*" element={<Navigate to="/" />} />
+    </Routes>
+  );
+};
+
+function App() {
+  return (
+    <AuthProvider>
+      <Router>
+        <AppRoutes />
+      </Router>
+    </AuthProvider>
+  );
 }
 
-export default App
+export default App;

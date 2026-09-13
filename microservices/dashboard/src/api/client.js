@@ -28,6 +28,8 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+
+
 // Maneja errores globales (401 = token expirado)
 apiClient.interceptors.response.use(
   (response) => response,
