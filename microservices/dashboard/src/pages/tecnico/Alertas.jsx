@@ -1,12 +1,7 @@
 import React from 'react';
+import AlertasView from '../../components/shared/AlertasView';
 
-const Alertas = () => {
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">Alertas HACCP (Técnico)</h1>
-      <p className="text-gray-600">Gestión de alertas: reconocer y resolver.</p>
-    </div>
-  );
-};
+// El Técnico puede reconocer y resolver alertas (CU-06).
+const Alertas = () => <AlertasView canManage={true} />;
 
 export default Alertas;

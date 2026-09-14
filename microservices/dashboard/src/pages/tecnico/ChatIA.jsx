@@ -1,12 +1,6 @@
 import React from 'react';
+import ChatIAView from '../../components/shared/ChatIAView';
 
-const ChatIA = () => {
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">Asistente IA (Técnico)</h1>
-      <p className="text-gray-600">Chat con Gemini.</p>
-    </div>
-  );
-};
+const ChatIA = () => <ChatIAView />;
 
 export default ChatIA;

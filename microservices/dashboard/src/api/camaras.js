@@ -1,9 +1,8 @@
-// lo que hace este archivo es crear un clinete de axios configurado para 
-// las camaras interactuando con la API de FastAPI.
+// Cliente de cámaras: CRUD sobre /api/v1/camaras (gestión solo Gerente).
 
-import axios from 'axios';
+import apiClient from './client';
 
-//listar las camaras
+// listar las camaras
 // permisos: tecnico, gerente
 export const getCamaras = async () => {
   try {
@@ -15,7 +14,6 @@ export const getCamaras = async () => {
     );
   }
 };
-
 
 // obtener una camara por ID
 // permisos: tecnico, gerente
@@ -56,17 +54,15 @@ export const actualizarCamara = async (id, data) => {
   }
 };
 
-
 // eliminar camara
 // solo gerente
 export const eliminarCamara = async (id) => {
-    try {
-        const response = await apiClient.delete(`/camaras/${id}`);
-        return response.data;
-    } catch (error) {
-        throw new Error(
-            error.response?.data?.detail || 'Error al eliminar la cámara'
-        );
-    }
+  try {
+    const response = await apiClient.delete(`/camaras/${id}`);
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.detail || 'Error al eliminar la cámara'
+    );
+  }
 };
-

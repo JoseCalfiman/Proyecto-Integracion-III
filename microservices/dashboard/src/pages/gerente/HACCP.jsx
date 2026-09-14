@@ -1,12 +1,6 @@
 import React from 'react';
+import HaccpRulesView from '../../components/shared/HaccpRulesView';
 
-const HACCP = () => {
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">Reglas HACCP</h1>
-      <p className="text-gray-600">Configuración de umbrales HACCP.</p>
-    </div>
-  );
-};
+const HACCP = () => <HaccpRulesView />;
 
 export default HACCP;
