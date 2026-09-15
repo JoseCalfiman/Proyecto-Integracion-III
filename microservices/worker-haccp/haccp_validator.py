@@ -28,13 +28,10 @@ def validar_haccp(
     alerta_predictiva: Mapping[str, Any] | Any,
     regla_camara: Mapping[str, Any] | Any,
 ) -> bool:
-    """Indica si una alerta predictiva incumple la regla de su cámara.
+    """Indica si una alerta predictiva incumple la regla de su cámara."""
 
-    Cada cámara aporta sus propios límites mediante ``regla_camara``. Se
-    considera incumplimiento cuando la temperatura prevista supera el máximo
-    absoluto o cuando el tiempo restante previsto es menor que la tolerancia.
-    """
-    if _get_value(regla_camara, "is_active") is False:
+    # Cambio: "active" en lugar de "is_active"
+    if _get_value(regla_camara, "active") is False:
         return False
 
     temperature = _get_value(alerta_predictiva, "temperature")
@@ -42,8 +39,11 @@ def validar_haccp(
         temperature = _get_value(alerta_predictiva, "projected_temperature")
     if temperature is None:
         temperature = _get_value(alerta_predictiva, "temperature_c")
+
     remaining_time_min = _get_value(alerta_predictiva, "remaining_time_min")
-    absolute_max_temp = _get_value(regla_camara, "absolute_max_temp")
+
+    # Cambio: "max_absolute_temp" y "min_absolute_temp"
+    absolute_max_temp = _get_value(regla_camara, "max_absolute_temp")
     tolerance_time_min = _get_value(regla_camara, "tolerance_time_min")
 
     actual_missing = [
@@ -51,7 +51,7 @@ def validar_haccp(
         for name, value in (
             ("temperature/projected_temperature", temperature),
             ("remaining_time_min", remaining_time_min),
-            ("absolute_max_temp", absolute_max_temp),
+            ("max_absolute_temp", absolute_max_temp),
             ("tolerance_time_min", tolerance_time_min),
         )
         if value is None
@@ -70,10 +70,11 @@ def _normalize_rule(rule: Optional[dict[str, Any]]) -> dict[str, Any]:
     normalized = DEFAULT_HACCP_RULE.copy()
     if rule:
         normalized.update(rule)
-        if "absolute_max_temp" in rule:
-            normalized["max_temp_c"] = float(rule["absolute_max_temp"])
-        if "absolute_min_temp" in rule:
-            normalized["min_temp_c"] = float(rule["absolute_min_temp"])
+        # Cambio: "max_absolute_temp" y "min_absolute_temp"
+        if "max_absolute_temp" in rule:
+            normalized["max_temp_c"] = float(rule["max_absolute_temp"])
+        if "min_absolute_temp" in rule:
+            normalized["min_temp_c"] = float(rule["min_absolute_temp"])
         if "tolerance_time_min" in rule:
             normalized["warning_duration_seconds"] = float(rule["tolerance_time_min"]) * 60
     return normalized
