@@ -6,7 +6,9 @@ import numpy as np
 
 TimestampLike = Union[datetime, float, int]
 
-#Convierte la lista de timestamps (datetime o números) a segundos relativos al primer dato
+
+# Convierte la lista de timestamps (datetime o números) a
+# segundos relativos al primer dato.
 def _timestamps_a_segundos(timestamps: List[TimestampLike]) -> np.ndarray:
     if isinstance(timestamps[0], datetime):
         base = timestamps[0]
@@ -17,7 +19,7 @@ def _timestamps_a_segundos(timestamps: List[TimestampLike]) -> np.ndarray:
     return np.array(timestamps, dtype=float) - float(timestamps[0])
 
 
-#Calcula la pendiente de calentamiento (°C/min)
+# Calcula la pendiente de calentamiento (°C/min)
 def calcular_pendiente(
     timestamps: List[TimestampLike],
     temperaturas: List[float],
@@ -42,7 +44,9 @@ def calcular_pendiente(
     return float(pendiente_por_minuto)
 
 
-#Estima cuántos minutos faltan para llegar al límite HACCP según la pendiente actual
+# Estima cuántos minutos faltan para llegar al límite HACCP
+# según la pendiente actual.
+
 def estimar_tiempo_restante(
     temperatura_actual: float,
     limite_haccp: float,
@@ -56,7 +60,8 @@ def estimar_tiempo_restante(
     return (limite_haccp - temperatura_actual) / pendiente_por_minuto
 
 
-# Combina pendiente + tiempo restante y determina si hay riesgo
+# 
+# Combina pendiente + tiempo restante y determina si hay riesgo.
 def evaluar_riesgo(
     buffer: List[dict],
     limite_haccp: float,
@@ -71,7 +76,7 @@ def evaluar_riesgo(
         }
 
     timestamps = [d["timestamp"] for d in buffer]
-    temperaturas = [d["temperatura"] for d in buffer]
+    temperaturas = [d["temperature"] for d in buffer]  # ← Ajustado al MER
 
     pendiente = calcular_pendiente(timestamps, temperaturas)
     if pendiente is None:
@@ -96,6 +101,7 @@ def evaluar_riesgo(
     }
 
 
+# Bloque de prueba (ejecutar directamente para validar)
 if __name__ == "__main__":
     ejemplo_timestamps = [0, 60, 120, 180, 240, 300]
     ejemplo_temperaturas = [-18.0, -17.5, -17.0, -16.6, -16.1, -15.5]
