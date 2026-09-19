@@ -50,6 +50,17 @@ services:
     networks:
       - frigorifico-net
 
+  kafka-init:
+    image: apache/kafka:latest
+    container_name: kafka-init
+    depends_on:
+      - kafka
+    volumes:
+      - ./kafka/topics-setup.sh:/topics-setup.sh:ro
+    entrypoint: ["/bin/bash", "/topics-setup.sh"]
+    networks:
+      - frigorifico-net
+
   # TimescaleDB
   # para que los datos no se pierdan al reiniciar el contenedor, se utiliza un volumen persistente
   timescaledb:
