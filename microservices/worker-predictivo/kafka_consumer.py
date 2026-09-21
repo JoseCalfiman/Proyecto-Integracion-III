@@ -9,9 +9,10 @@ from config import (
     VENTANA_MINUTOS, UMBRAL_ALERTA_MINUTOS,
 )
 from predictor import evaluar_riesgo
+from db import get_session
+from haccp_predictions import obtener_regla_haccp_activa, guardar_prediccion
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
 
 class PredictiveKafkaWorker:
     def __init__(self):
@@ -72,7 +73,6 @@ class PredictiveKafkaWorker:
                     logging.error(f"Error de Kafka: {msg.error()}")
                     continue
 
-                # Parsear payload (según el MER oficial)
                 data = json.loads(msg.value().decode('utf-8'))
                 logging.info(f"Datos recibidos: {data}")
 
@@ -82,16 +82,55 @@ class PredictiveKafkaWorker:
 
                 buffer = self._actualizar_buffer(id_chamber, timestamp, temperature)
 
-                resultado = evaluar_riesgo(
-                    buffer=list(buffer),
-                    limite_haccp=LIMITE_HACCP_DEFAULT,
-                    umbral_alerta_minutos=UMBRAL_ALERTA_MINUTOS,
-                )
+                with get_session() as session:
+                    regla = obtener_regla_haccp_activa(session, chamber_id=id_chamber)
 
-                logging.info(
-                    f"[{id_chamber}] pendiente={resultado['pendiente_por_minuto']} "
-                    f"tiempo_restante_min={resultado['tiempo_restante_min']}"
-                )
+                    if regla is not None:
+                        absolute_max_temp = regla["max_absolute_temp"]
+                        umbral_alerta = (
+                            regla["tolerance_time_min"]
+                            if regla["tolerance_time_min"] is not None
+                            else UMBRAL_ALERTA_MINUTOS
+                        )
+                    else:
+                        logging.warning(
+                            f"Sin regla HACCP activa para id_chamber={id_chamber}; "
+                            f"usando valores por defecto de config.py"
+                        )
+                        absolute_max_temp = LIMITE_HACCP_DEFAULT
+                        umbral_alerta = UMBRAL_ALERTA_MINUTOS
+
+                    resultado = evaluar_riesgo(
+                        buffer=list(buffer),
+                        absolute_max_temp=absolute_max_temp,
+                        umbral_alerta_minutos=umbral_alerta,
+                    )
+
+                    logging.info(
+                        f"[{id_chamber}] pendiente={resultado['pendiente_por_minuto']} "
+                        f"tiempo_restante_min={resultado['tiempo_restante_min']} "
+                        f"nivel_riesgo={resultado['nivel_riesgo']}"
+                    )
+                    projected_temperature = (
+                        absolute_max_temp
+                        if resultado["tiempo_restante_min"] is not None
+                        else None
+                    )
+
+                    try:
+                        guardar_prediccion(
+                            session,
+                            chamber_id=id_chamber,
+                            calculated_slope=resultado["pendiente_por_minuto"],
+                            projected_temperature=projected_temperature,
+                            remaining_time_min=resultado["tiempo_restante_min"],
+                            risk_level=resultado["nivel_riesgo"],
+                        )
+                    except Exception:
+                        logging.exception(
+                            f"No se pudo guardar la predicción para {id_chamber}"
+                        )
+                        session.rollback()
 
                 if resultado["hay_riesgo"]:
                     alert_payload = {
@@ -103,8 +142,6 @@ class PredictiveKafkaWorker:
                     }
                     self.send_anomaly_alert(alert_payload)
 
-                    # TODO: Guardar en la tabla `predictions` (SQLAlchemy)
-
         except KeyboardInterrupt:
             logging.info("Deteniendo el consumidor...")
         finally:
@@ -112,5 +149,8 @@ class PredictiveKafkaWorker:
 
 
 if __name__ == "__main__":
+    from db import crear_tablas
+
+    crear_tablas()
     worker = PredictiveKafkaWorker()
     worker.start_listening()
