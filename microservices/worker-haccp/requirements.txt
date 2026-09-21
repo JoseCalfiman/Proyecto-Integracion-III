@@ -1,0 +1,3 @@
+# Dependencias del microservicio HACCP
+# Sin librerías externas requeridas para la lógica base del validador.
+pytest>=8.0.0
