@@ -3,9 +3,7 @@ from typing import List, Optional, Union
 from sklearn.linear_model import LinearRegression
 import numpy as np
 
-
 TimestampLike = Union[datetime, float, int]
-
 
 # Convierte la lista de timestamps (datetime o números) a
 # segundos relativos al primer dato.
@@ -28,7 +26,6 @@ def calcular_pendiente(
         raise ValueError("timestamps y temperaturas deben tener la misma longitud")
 
     if len(temperaturas) < 2:
-        # No hay suficientes puntos para ajustar una recta
         return None
 
     segundos = _timestamps_a_segundos(timestamps)
@@ -43,28 +40,36 @@ def calcular_pendiente(
 
     return float(pendiente_por_minuto)
 
-
-# Estima cuántos minutos faltan para llegar al límite HACCP
-# según la pendiente actual.
-
 def estimar_tiempo_restante(
     temperatura_actual: float,
-    limite_haccp: float,
+    absolute_max_temp: float,
     pendiente_por_minuto: float,
 ) -> Optional[float]:
     if pendiente_por_minuto <= 0:
         return None
-    if temperatura_actual >= limite_haccp:
+    if temperatura_actual >= absolute_max_temp:
         return 0.0
 
-    return (limite_haccp - temperatura_actual) / pendiente_por_minuto
+    return (absolute_max_temp - temperatura_actual) / pendiente_por_minuto
 
+def determinar_nivel_riesgo(
+    tiempo_restante_min: Optional[float],
+    umbral_alerta_minutos: float = 40.0,
+) -> str:
+    if tiempo_restante_min is None:
+        return "SIN_RIESGO"
+    if tiempo_restante_min <= umbral_alerta_minutos * 0.25:
+        return "CRITICO"
+    if tiempo_restante_min <= umbral_alerta_minutos * 0.6:
+        return "ALTO"
+    if tiempo_restante_min <= umbral_alerta_minutos:
+        return "MEDIO"
+    return "BAJO"
 
-# 
 # Combina pendiente + tiempo restante y determina si hay riesgo.
 def evaluar_riesgo(
     buffer: List[dict],
-    limite_haccp: float,
+    absolute_max_temp: float,
     umbral_alerta_minutos: float = 40.0,
 ) -> dict:
 
@@ -73,10 +78,11 @@ def evaluar_riesgo(
             "pendiente_por_minuto": None,
             "tiempo_restante_min": None,
             "hay_riesgo": False,
+            "nivel_riesgo": "SIN_RIESGO",
         }
 
     timestamps = [d["timestamp"] for d in buffer]
-    temperaturas = [d["temperature"] for d in buffer]  # ← Ajustado al MER
+    temperaturas = [d["temperature"] for d in buffer]
 
     pendiente = calcular_pendiente(timestamps, temperaturas)
     if pendiente is None:
@@ -84,20 +90,23 @@ def evaluar_riesgo(
             "pendiente_por_minuto": None,
             "tiempo_restante_min": None,
             "hay_riesgo": False,
+            "nivel_riesgo": "SIN_RIESGO",
         }
 
     tiempo_restante = estimar_tiempo_restante(
         temperatura_actual=temperaturas[-1],
-        limite_haccp=limite_haccp,
+        absolute_max_temp=absolute_max_temp,
         pendiente_por_minuto=pendiente,
     )
 
     hay_riesgo = tiempo_restante is not None and tiempo_restante <= umbral_alerta_minutos
+    nivel_riesgo = determinar_nivel_riesgo(tiempo_restante, umbral_alerta_minutos)
 
     return {
         "pendiente_por_minuto": pendiente,
         "tiempo_restante_min": tiempo_restante,
         "hay_riesgo": hay_riesgo,
+        "nivel_riesgo": nivel_riesgo,
     }
 
 
@@ -111,7 +120,7 @@ if __name__ == "__main__":
 
     tiempo_restante = estimar_tiempo_restante(
         temperatura_actual=ejemplo_temperaturas[-1],
-        limite_haccp=-10.0,
+        absolute_max_temp=-10.0,
         pendiente_por_minuto=pendiente,
     )
     print(f"Tiempo restante estimado: {tiempo_restante:.1f} min")
