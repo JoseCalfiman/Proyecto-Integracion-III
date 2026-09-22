@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from contextlib import contextmanager
@@ -18,6 +19,10 @@ DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "postgres")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASS = os.getenv("DB_PASS", "")
+
+# Contexto de negocio requerido por el esquema (FK NOT NULL).
+CHAMBER_ID = int(os.getenv("OPTIMIZATION_CHAMBER_ID", "1"))
+COMPANY_ID = int(os.getenv("OPTIMIZATION_COMPANY_ID", "1"))
 
 
 def _dsn_kwargs() -> dict[str, Any]:
@@ -57,24 +62,34 @@ def get_connection() -> Iterator[Any]:
 
 
 def get_latest_price() -> float | None:
-    """Ultimo precio registrado en ``energy_price`` o ``None``."""
+    """Ultimo precio registrado en ``energy_price`` (CLP/kWh) o ``None``."""
     with get_connection() as conn:
         if conn is None:
             return None
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT price_clp_kwh FROM energy_price ORDER BY ts DESC LIMIT 1"
+                "SELECT price_kwh FROM energy_price ORDER BY queried_at DESC LIMIT 1"
             )
             row = cur.fetchone()
     return float(row[0]) if row else None
 
 
+def get_latest_price_id() -> int | None:
+    with get_connection() as conn:
+        if conn is None:
+            return None
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT price_id FROM energy_price ORDER BY queried_at DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+    return int(row[0]) if row else None
+
+
 def save_predicted_consumption(
     target_date: date | str,
     predicted_kwh: float,
-    yhat_lower: float | None = None,
-    yhat_upper: float | None = None,
-    model: str = "prophet",
+    chamber_id: int | None = None,
 ) -> bool:
     with get_connection() as conn:
         if conn is None:
@@ -83,10 +98,10 @@ def save_predicted_consumption(
             cur.execute(
                 """
                 INSERT INTO predicted_consumption
-                    (target_date, predicted_kwh, yhat_lower, yhat_upper, model)
-                VALUES (%s, %s, %s, %s, %s)
+                    (chamber_id, prediction_date, predicted_consumption_kw)
+                VALUES (%s, %s, %s)
                 """,
-                (target_date, predicted_kwh, yhat_lower, yhat_upper, model),
+                (chamber_id or CHAMBER_ID, target_date, predicted_kwh),
             )
     return True
 
@@ -95,22 +110,36 @@ def save_saving_recommendations(
     target_date: date | str,
     price_clp_kwh: float,
     recommendations: list[dict[str, Any]],
+    price_id: int | None = None,
+    company_id: int | None = None,
+    chamber_id: int | None = None,
 ) -> bool:
     if not recommendations:
         return True
 
-    rows = [
-        (
-            target_date,
-            rec.get("equipment"),
-            rec.get("action"),
-            list(rec.get("window") or []),
-            rec.get("hours", 0),
-            rec.get("estimated_savings", 0),
-            price_clp_kwh,
+    rows = []
+    for rec in recommendations:
+        justification = json.dumps(
+            {
+                "target_date": str(target_date),
+                "equipment": rec.get("equipment"),
+                "window": rec.get("window"),
+                "hours": rec.get("hours"),
+                "price_clp_kwh": price_clp_kwh,
+            },
+            ensure_ascii=False,
         )
-        for rec in recommendations
-    ]
+        rows.append(
+            (
+                company_id or COMPANY_ID,
+                chamber_id or CHAMBER_ID,
+                price_id,
+                rec.get("action"),
+                rec.get("estimated_savings", 0),
+                justification,
+                "pending",
+            )
+        )
 
     with get_connection() as conn:
         if conn is None:
@@ -118,9 +147,9 @@ def save_saving_recommendations(
         with conn.cursor() as cur:
             cur.executemany(
                 """
-                INSERT INTO saving_recommendation
-                    (target_date, equipment, action, time_window, hours,
-                     estimated_savings, price_clp_kwh)
+                INSERT INTO saving_recommendations
+                    (company_id, chamber_id, price_id, action, amount_clp,
+                     justification, status)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 rows,
@@ -129,7 +158,7 @@ def save_saving_recommendations(
 
 
 def save_report(report: dict[str, Any]) -> bool:
-    """Persiste prediccion de consumo y recomendaciones de ahorro."""
+    """Persiste la prediccion de consumo y las recomendaciones de ahorro."""
     target_date = report.get("target_date")
     price = report.get("forecasted_kwh_cost") or report.get("price_clp_kwh") or 0.0
 
@@ -139,13 +168,12 @@ def save_report(report: dict[str, Any]) -> bool:
         ok = save_predicted_consumption(
             target_date=target_date,
             predicted_kwh=predicted_kwh,
-            yhat_lower=report.get("forecasted_kwh_lower"),
-            yhat_upper=report.get("forecasted_kwh_upper"),
         ) and ok
 
     ok = save_saving_recommendations(
         target_date=target_date,
         price_clp_kwh=price,
         recommendations=report.get("recommendations", []),
+        price_id=get_latest_price_id(),
     ) and ok
     return ok

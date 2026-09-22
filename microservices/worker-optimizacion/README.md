@@ -58,6 +58,8 @@ el buffer compartido, mientras el scheduler ejecuta la optimización periódicam
 | `KAFKA_GROUP_ID` | `worker-optimizacion` | Grupo de consumo |
 | `DB_HOST` / `DB_PORT` | `localhost` / `5432` | Conexión a la base de datos |
 | `DB_NAME` / `DB_USER` / `DB_PASS` | `postgres` / `postgres` / — | Credenciales |
+| `OPTIMIZATION_CHAMBER_ID` | `1` | Cámara asociada a las recomendaciones (FK del esquema) |
+| `OPTIMIZATION_COMPANY_ID` | `1` | Empresa asociada a las recomendaciones (FK del esquema) |
 | `PRECIO_CLP_KWH` | `145.0` | Precio de respaldo si no hay BD ni CSV |
 | `PRECIO_CNE_CSV` | `precio_cne.csv` | Ruta del CSV de precios CNE |
 
@@ -66,11 +68,16 @@ persistencia (registra un warning).
 
 ## Base de datos
 
-El esquema se crea con `database/init.sql`:
+El esquema del proyecto se define en `database/init.sql`. El worker escribe en:
 
-- `energy_price`: precio del kWh (CLP) por timestamp.
-- `predicted_consumption`: consumo diario predicho por Prophet.
-- `saving_recommendation`: recomendaciones de ahorro por equipo.
+- `energy_price`: lee el último `price_kwh` (CLP) por `queried_at`.
+- `predicted_consumption`: inserta el consumo diario predicho (`chamber_id`,
+  `prediction_date`, `predicted_consumption_kw`).
+- `saving_recommendations`: inserta las recomendaciones (`company_id`,
+  `chamber_id`, `price_id`, `action`, `amount_clp`, `justification`, `status`).
+
+La cámara y la empresa se toman de `OPTIMIZATION_CHAMBER_ID` y
+`OPTIMIZATION_COMPANY_ID` (por defecto `1`).
 
 ## Ejecución
 
