@@ -8,7 +8,7 @@ from confluent_kafka import Consumer, KafkaError
 from buffer import ReadingsBuffer, get_buffer, normalize_reading
 
 TOPIC = os.getenv("KAFKA_TOPIC", "sensor.raw")
-BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 GROUP_ID = os.getenv("KAFKA_GROUP_ID", "worker-optimizacion")
 
 def build_consumer():

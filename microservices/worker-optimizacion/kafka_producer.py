@@ -6,7 +6,7 @@ from confluent_kafka import Producer
 from ahorro import Action, calcular_ahorro_action
 
 REPORT_TOPIC = os.getenv("KAFKA_REPORT_TOPIC", "optimization.reports")
-BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 
 # Precio del kWh en CLP (precio_clp_kwh) usado para el calculo de ahorro.
 PRECIO_CLP_KWH = 145.0
