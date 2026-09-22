@@ -1,0 +1,144 @@
+networks:
+  frigorifico-net:
+    driver: bridge
+
+volumes:
+  kafka_data:
+  timescaledb_data:
+  mosquitto_data:
+  mosquitto_log:
+
+services:
+  # Broker MQTT
+  # ahora se utiliza la imagen oficial de Eclipse Mosquitto, que es más ligera y fácil de configurar
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/pwfile:/mosquitto/config/pwfile:ro
+      - ./mosquitto/acl.conf:/mosquitto/config/acl.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - frigorifico-net
+
+  # Kafka
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - frigorifico-net
+
+  kafka-init:
+    image: apache/kafka:latest
+    container_name: kafka-init
+    depends_on:
+      - kafka
+    volumes:
+      - ./kafka/topics-setup.sh:/topics-setup.sh:ro
+    entrypoint: ["/bin/bash", "/topics-setup.sh"]
+    networks:
+      - frigorifico-net
+
+  # TimescaleDB
+  # para que los datos no se pierdan al reiniciar el contenedor, se utiliza un volumen persistente
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - frigorifico-net
+
+  # Microservicio de ingesta
+  ingesta:
+    build: ./microservices/ingesta
+    container_name: ingesta
+    env_file:
+      - .env
+    ports:
+      - "8001:8000"
+    depends_on:
+      - mosquitto
+      - kafka
+      - timescaledb
+    networks:
+      - frigorifico-net
+
+  # Worker predictivo
+  worker-predictivo:
+    build: ./microservices/worker-predictivo
+    container_name: worker-predictivo
+    env_file:
+      - .env
+    depends_on:
+      - kafka
+      - timescaledb
+    networks:
+      - frigorifico-net
+
+  # Worker HACCP
+  worker-haccp:
+    build: ./microservices/worker-haccp
+    container_name: worker-haccp
+    env_file:
+      - .env
+    depends_on:
+      - kafka
+      - timescaledb
+    networks:
+      - frigorifico-net
+
+  # Worker optimización
+  worker-optimizacion:
+    build: ./microservices/worker-optimizacion
+    container_name: worker-optimizacion
+    env_file:
+      - .env
+    depends_on:
+      - kafka
+      - timescaledb
+    networks:
+      - frigorifico-net
+
+  # Dashboard (React + Nginx)
+  dashboard:
+    build: ./microservices/dashboard
+    container_name: dashboard
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+    depends_on:
+      - ingesta
+      - timescaledb
+    networks:
+      - frigorifico-net
