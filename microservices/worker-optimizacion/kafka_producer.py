@@ -8,8 +8,14 @@ from ahorro import Action, calcular_ahorro_action
 REPORT_TOPIC = os.getenv("KAFKA_REPORT_TOPIC", "optimization.reports")
 BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
-# Precio del kWh en CLP (precio_clp_kwh) usado para el cálculo de ahorro.
+# Precio del kWh en CLP (precio_clp_kwh) usado para el calculo de ahorro.
 PRECIO_CLP_KWH = 145.0
+
+# Ventana horaria de alto costo por defecto.
+DEFAULT_HIGH_COST_WINDOW = ["18:00", "22:00"]
+
+# Costo diario proyectado por defecto cuando no hay prediccion disponible.
+DEFAULT_PROJECTED_DAILY_COST = 580.0
 
 # Potencia nominal (kW) de los equipos candidatos.
 EQUIPMENT_POWER_KW = {
@@ -34,13 +40,25 @@ ACTIONS = [
 ]
 
 
-def build_recommendation() -> dict[str, Any]:
+def build_recommendation(
+    forecasted_kwh: float | None = None,
+    price_clp_kwh: float = PRECIO_CLP_KWH,
+    target_date: str | None = None,
+    high_cost_window: list[str] | None = None,
+    forecasted_kwh_lower: float | None = None,
+    forecasted_kwh_upper: float | None = None,
+) -> dict[str, Any]:
+    """Construye el reporte de optimizacion.
+
+    Cuando ``forecasted_kwh`` es ``None`` se mantienen los valores de ejemplo
+    (compatibilidad con la ejecucion standalone de este modulo).
+    """
     recommendations: list[dict[str, Any]] = []
     total_savings = 0.0
 
     for action in ACTIONS:
         potencia_kw = EQUIPMENT_POWER_KW[action.equipment]
-        savings = calcular_ahorro_action(action, potencia_kw, PRECIO_CLP_KWH)
+        savings = calcular_ahorro_action(action, potencia_kw, price_clp_kwh)
         total_savings += savings
         recommendations.append(
             {
@@ -52,12 +70,20 @@ def build_recommendation() -> dict[str, Any]:
             }
         )
 
+    if forecasted_kwh is not None:
+        projected_daily_cost = forecasted_kwh * price_clp_kwh
+    else:
+        projected_daily_cost = DEFAULT_PROJECTED_DAILY_COST
+
     return {
         "type": "optimization_report",
-        "target_date": "2024-01-08",
-        "forecasted_kwh_cost": PRECIO_CLP_KWH,
-        "projected_daily_cost": 580.0,
-        "high_cost_window": ["18:00", "22:00"],
+        "target_date": target_date or "2024-01-08",
+        "forecasted_kwh": forecasted_kwh,
+        "forecasted_kwh_lower": forecasted_kwh_lower,
+        "forecasted_kwh_upper": forecasted_kwh_upper,
+        "forecasted_kwh_cost": price_clp_kwh,
+        "projected_daily_cost": projected_daily_cost,
+        "high_cost_window": high_cost_window or DEFAULT_HIGH_COST_WINDOW,
         "estimated_savings": total_savings,
         "recommendations": recommendations,
     }

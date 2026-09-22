@@ -2,6 +2,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+# Minimo de observaciones diarias para poder ajustar Prophet.
+MIN_DAILY_POINTS = 2
+
 def build_example_df(
     periods: int = 120,
     start: str = "2024-01-01",
@@ -40,3 +43,27 @@ def forecast_example(
     forecast = model.predict(future)
 
     return df, forecast
+
+
+def forecast_daily_consumption(
+    df: pd.DataFrame,
+    horizon: int = 1,
+    freq: str = "D",
+) -> pd.DataFrame | None:
+    """Ajusta Prophet sobre consumo diario real y predice ``horizon`` dias.
+
+    ``df`` debe tener columnas ``ds`` (fechas) e ``y`` (kWh por dia). Devuelve
+    el DataFrame de Prophet (con ``yhat``, ``yhat_lower``, ``yhat_upper``) o
+    ``None`` si no hay suficientes datos.
+    """
+    if horizon <= 0:
+        raise ValueError("horizon debe ser mayor o igual a 1")
+    if df is None or df.empty or len(df) < MIN_DAILY_POINTS:
+        return None
+
+    from prophet import Prophet
+
+    model = Prophet()
+    model.fit(df[["ds", "y"]])
+    future = model.make_future_dataframe(periods=horizon, freq=freq)
+    return model.predict(future)

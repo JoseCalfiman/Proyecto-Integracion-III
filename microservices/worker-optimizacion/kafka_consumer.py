@@ -2,7 +2,10 @@ import json
 import os
 import signal
 import threading
+
 from confluent_kafka import Consumer, KafkaError
+
+from buffer import ReadingsBuffer, get_buffer, normalize_reading
 
 TOPIC = os.getenv("KAFKA_TOPIC", "sensor.raw")
 BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -18,15 +21,26 @@ def build_consumer():
         }
     )
 
-def process_message(raw):
+def process_message(raw, buffer: ReadingsBuffer | None = None) -> dict | None:
+    """Parsea el payload, lo normaliza y lo agrega al buffer compartido."""
     try:
         data = json.loads(raw.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as exc:
+    except (ValueError, UnicodeDecodeError, AttributeError) as exc:
         print(f"[kafka_consumer] payload invalido en sensor.raw: {exc}")
-        return
-    print(f"[kafka_consumer] dato recibido desde {TOPIC}: {data}")
+        return None
 
-def consume(consumer, stop_event):
+    reading = normalize_reading(data)
+    if reading is None:
+        print(f"[kafka_consumer] dato sin consumo/temperatura util: {data}")
+        return None
+
+    target = buffer if buffer is not None else get_buffer()
+    target.add(reading)
+    print(f"[kafka_consumer] dato recibido desde {TOPIC}: {reading}")
+    return reading
+
+
+def consume(consumer, stop_event, buffer: ReadingsBuffer | None = None):
     consumer.subscribe([TOPIC])
     while not stop_event.is_set():
         msg = consumer.poll(timeout=1.0)
@@ -36,7 +50,7 @@ def consume(consumer, stop_event):
             if msg.error().code() == KafkaError._PARTITION_EOF:
                 continue
             raise KafkaError(msg.error())
-        process_message(msg.value())
+        process_message(msg.value(), buffer)
 
 def main():
     consumer = build_consumer()
