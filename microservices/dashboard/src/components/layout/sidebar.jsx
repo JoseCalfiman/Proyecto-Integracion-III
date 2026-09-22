@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   Home, AlertTriangle, TrendingUp, MessageSquare,
   Settings, Users, FileText, LogOut, HelpCircle,
-  Camera, Wrench,
+  Camera, Wrench, ClipboardList,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -18,18 +18,20 @@ const Sidebar = () => {
     { icon: TrendingUp, label: 'Optimización y Ahorro', path: '/ahorro' },
     { icon: MessageSquare, label: 'Asistente IA', path: '/chat-ia' },
     { icon: Camera, label: 'Configuración de Cámaras', path: '/camaras' },
-    { icon: Settings, label: 'Reglas HACCP', path: '/haccp' },
+    { icon: ClipboardList, label: 'Reglas HACCP', path: '/haccp' },  // ← Cambiado
     { icon: Users, label: 'Gestión de Usuarios', path: '/usuarios' },
     { icon: FileText, label: 'Historial y Reportes', path: '/historial' },
+    { icon: Settings, label: 'Configuración', path: '/configuracion' },
   ];
 
   const menuTecnico = [
     { icon: Home, label: 'Monitoreo', path: '/' },
     { icon: AlertTriangle, label: 'Alertas HACCP', path: '/alertas' },
     { icon: MessageSquare, label: 'Asistente IA', path: '/chat-ia' },
-    { icon: Settings, label: 'Reglas HACCP', path: '/haccp' },
+    { icon: ClipboardList, label: 'Reglas HACCP', path: '/haccp' },  // ← Cambiado
     { icon: Wrench, label: 'Panel Técnico', path: '/panel-tecnico' },
     { icon: FileText, label: 'Historial y Reportes', path: '/historial' },
+    { icon: Settings, label: 'Configuración', path: '/configuracion' },
   ];
 
   const menuItems = rol === 'gerente' ? menuGerente : menuTecnico;

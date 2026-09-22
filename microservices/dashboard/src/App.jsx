@@ -25,6 +25,7 @@ import TecnicoHistorial from './pages/tecnico/Historial';
 
 // Página compartida
 import Soporte from './pages/Soporte';
+import Configuracion from './pages/Configuracion';
 
 // ============================================================
 // RUTA PROTEGIDA
@@ -142,6 +143,12 @@ const AppRoutes = () => {
       <Route path="/soporte" element={
         <ProtectedRoute allowedRoles={['gerente', 'tecnico']}>
           <Layout><Soporte /></Layout>
+        </ProtectedRoute>
+      } />
+
+      <Route path="/configuracion" element={
+        <ProtectedRoute allowedRoles={['gerente', 'tecnico']}>
+          <Layout><Configuracion /></Layout>
         </ProtectedRoute>
       } />
 
