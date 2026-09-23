@@ -86,6 +86,42 @@ def get_latest_price_id() -> int | None:
     return int(row[0]) if row else None
 
 
+def get_consumption_history(
+    days: int = 7,
+    chamber_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """Consumo diario (kWh) de los ultimos ``days`` dias para una camara.
+
+    Agrega ``sensor_data`` por dia (``SUM(consumption_kw)``) filtrando por
+    ``chamber_id``. Devuelve una lista de ``{"date", "consumption_kwh"}`` o una
+    lista vacia si la BD no esta disponible.
+    """
+    if days <= 0:
+        raise ValueError("days debe ser mayor o igual a 1")
+
+    with get_connection() as conn:
+        if conn is None:
+            return []
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT date_trunc('day', recorded_at) AS day,
+                       SUM(consumption_kw) AS total_kwh
+                FROM sensor_data
+                WHERE chamber_id = %s
+                  AND recorded_at >= NOW() - (%s * INTERVAL '1 day')
+                GROUP BY day
+                ORDER BY day
+                """,
+                (chamber_id or CHAMBER_ID, days),
+            )
+            rows = cur.fetchall()
+
+    return [
+        {"date": row[0], "consumption_kwh": float(row[1] or 0.0)} for row in rows
+    ]
+
+
 def save_predicted_consumption(
     target_date: date | str,
     predicted_kwh: float,
