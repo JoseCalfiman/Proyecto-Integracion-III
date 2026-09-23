@@ -6,7 +6,7 @@ from confluent_kafka import Consumer, Producer, KafkaError
 from config import (
     BOOTSTRAP_SERVERS, GROUP_ID, AUTO_OFFSET_RESET,
     TOPIC_RAW, TOPIC_ANOMALY, LIMITE_HACCP_DEFAULT,
-    VENTANA_MINUTOS, UMBRAL_ALERTA_MINUTOS,
+    VENTANA_MINUTOS, MAX_MEDICIONES_VENTANA, UMBRAL_ALERTA_MINUTOS, SEVERITY_DEFAULT,
 )
 from predictor import evaluar_riesgo
 from db import get_session
@@ -26,7 +26,7 @@ class PredictiveKafkaWorker:
         producer_conf = {'bootstrap.servers': BOOTSTRAP_SERVERS}
         self.producer = Producer(producer_conf)
 
-        self.buffers = defaultdict(deque)
+        self.buffers = defaultdict(lambda: deque(maxlen=MAX_MEDICIONES_VENTANA))
 
     def delivery_report(self, err, msg):
         if err is not None:
@@ -37,7 +37,7 @@ class PredictiveKafkaWorker:
     def send_anomaly_alert(self, alert_payload):
         self.producer.produce(
             TOPIC_ANOMALY,
-            key=str(alert_payload.get("id_chamber")),
+            key=str(alert_payload.get("chamber_id")),
             value=json.dumps(alert_payload),
             callback=self.delivery_report,
         )
@@ -92,6 +92,7 @@ class PredictiveKafkaWorker:
                             if regla["tolerance_time_min"] is not None
                             else UMBRAL_ALERTA_MINUTOS
                         )
+                        severity = regla["severity"]
                     else:
                         logging.warning(
                             f"Sin regla HACCP activa para id_chamber={id_chamber}; "
@@ -99,6 +100,7 @@ class PredictiveKafkaWorker:
                         )
                         absolute_max_temp = LIMITE_HACCP_DEFAULT
                         umbral_alerta = UMBRAL_ALERTA_MINUTOS
+                        severity = SEVERITY_DEFAULT
 
                     resultado = evaluar_riesgo(
                         buffer=list(buffer),
@@ -134,10 +136,12 @@ class PredictiveKafkaWorker:
 
                 if resultado["hay_riesgo"]:
                     alert_payload = {
-                        "id_chamber": id_chamber,
-                        "current_temperature": temperature,
-                        "slope_per_minute": resultado["pendiente_por_minuto"],
+                        "chamber_id": str(id_chamber),
                         "remaining_time_min": resultado["tiempo_restante_min"],
+                        "temperature": temperature,
+                        "severity": severity,
+                        "risk_level": resultado["nivel_riesgo"],
+                        "slope_per_minute": resultado["pendiente_por_minuto"],
                         "recorded_at": timestamp.isoformat(),
                     }
                     self.send_anomaly_alert(alert_payload)
@@ -146,7 +150,6 @@ class PredictiveKafkaWorker:
             logging.info("Deteniendo el consumidor...")
         finally:
             self.consumer.close()
-
 
 if __name__ == "__main__":
     from db import crear_tablas
