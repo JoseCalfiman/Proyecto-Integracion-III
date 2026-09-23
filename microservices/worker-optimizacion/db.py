@@ -171,6 +171,7 @@ def save_saving_recommendations(
                 chamber_id or CHAMBER_ID,
                 price_id,
                 rec.get("action"),
+                rec.get("savings_percentage"),
                 rec.get("estimated_savings", 0),
                 justification,
                 "pending",
@@ -184,9 +185,9 @@ def save_saving_recommendations(
             cur.executemany(
                 """
                 INSERT INTO saving_recommendations
-                    (company_id, chamber_id, price_id, action, amount_clp,
-                     justification, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (company_id, chamber_id, price_id, action, savings_percentage,
+                     amount_clp, justification, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 rows,
             )

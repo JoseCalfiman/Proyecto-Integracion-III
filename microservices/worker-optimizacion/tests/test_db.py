@@ -19,6 +19,9 @@ class FakeCursor:
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
 
+    def executemany(self, sql, seq_of_params=None):
+        self.executed.append((sql, seq_of_params))
+
     def fetchall(self):
         return self._rows
 
@@ -104,3 +107,56 @@ def test_get_consumption_history_uses_default_chamber_and_days(monkeypatch):
 def test_get_consumption_history_rejects_non_positive_days():
     with pytest.raises(ValueError):
         db.get_consumption_history(days=0)
+
+
+def test_save_saving_recommendations_inserts_savings_percentage(monkeypatch):
+    factory = _fake_get_connection([])
+    monkeypatch.setattr(db, "get_connection", factory)
+
+    ok = db.save_saving_recommendations(
+        target_date="2024-01-08",
+        price_clp_kwh=145.0,
+        recommendations=[
+            {
+                "action": "apagar",
+                "estimated_savings": 1450.0,
+                "savings_percentage": 1.72,
+                "equipment": "camaras_2_y_3",
+                "window": ["18:00", "22:00"],
+                "hours": 2,
+            }
+        ],
+        price_id=5,
+        company_id=2,
+        chamber_id=3,
+    )
+
+    assert ok is True
+    sql, params = factory.conn._cursor.executed[-1]
+    assert "savings_percentage" in sql
+    (
+        company_id,
+        chamber_id,
+        price_id,
+        action,
+        savings_percentage,
+        amount_clp,
+        justification,
+        status,
+    ) = params[0]
+    assert (company_id, chamber_id, price_id, action) == (2, 3, 5, "apagar")
+    assert savings_percentage == 1.72
+    assert amount_clp == 1450.0
+    assert status == "pending"
+    assert "target_date" in justification
+
+
+def test_save_saving_recommendations_without_rows_is_noop(monkeypatch):
+    def fail():
+        raise AssertionError("no deberia conectar a la BD")
+
+    monkeypatch.setattr(db, "get_connection", fail)
+    assert db.save_saving_recommendations(
+        target_date="2024-01-08", price_clp_kwh=145.0, recommendations=[]
+    ) is True
+

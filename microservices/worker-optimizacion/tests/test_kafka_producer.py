@@ -23,6 +23,16 @@ def test_build_recommendation_records_are_valid():
         assert set(rec.keys()) >= {"equipment", "action", "window"}
 
 
+def test_build_recommendation_includes_savings_percentage():
+    report = build_recommendation(forecasted_kwh=580.0, price_clp_kwh=145.0)
+    projected_cost = report["projected_daily_cost"]
+
+    assert report["recommendations"]
+    for rec in report["recommendations"]:
+        expected = round(rec["estimated_savings"] / projected_cost * 100, 2)
+        assert rec["savings_percentage"] == expected
+
+
 def test_publish_report_serializes_json_and_produces():
     producer = build_producer()
     report = build_recommendation()
