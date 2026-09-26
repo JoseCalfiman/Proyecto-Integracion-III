@@ -11,7 +11,7 @@ from typing import Any, Iterable, List, Optional
 DEFAULT_HACCP_RULE = {
     "name": "cold_chain_temperature",
     "max_temp_c": 4.0,
-    "warning_duration_seconds": 120,
+    "warning_duration_seconds": 600,
     "critical_duration_seconds": 300,
     "critical_temp_c": 6.0,
     "sample_interval_seconds": 10,
@@ -33,7 +33,7 @@ def evaluate_temperature_rule(
 ) -> dict[str, Any]:
     """Evalúa una medición puntual y su duración de exposición.
 
-    Regla base: si la temperatura supera los 4 °C durante más de 120 segundos,
+    Regla base: si la temperatura supera los 4 °C durante al menos 10 minutos,
     se considera una alerta HACCP.
     """
     active_rule = _normalize_rule(rule)
