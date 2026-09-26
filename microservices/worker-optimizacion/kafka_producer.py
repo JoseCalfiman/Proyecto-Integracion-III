@@ -56,10 +56,20 @@ def build_recommendation(
     recommendations: list[dict[str, Any]] = []
     total_savings = 0.0
 
+    if forecasted_kwh is not None:
+        projected_daily_cost = forecasted_kwh * price_clp_kwh
+    else:
+        projected_daily_cost = DEFAULT_PROJECTED_DAILY_COST
+
     for action in ACTIONS:
         potencia_kw = EQUIPMENT_POWER_KW[action.equipment]
         savings = calcular_ahorro_action(action, potencia_kw, price_clp_kwh)
         total_savings += savings
+        savings_percentage = (
+            round(savings / projected_daily_cost * 100, 2)
+            if projected_daily_cost
+            else 0.0
+        )
         recommendations.append(
             {
                 "equipment": action.equipment,
@@ -67,13 +77,9 @@ def build_recommendation(
                 "window": list(action.window),
                 "hours": action.hours,
                 "estimated_savings": savings,
+                "savings_percentage": savings_percentage,
             }
         )
-
-    if forecasted_kwh is not None:
-        projected_daily_cost = forecasted_kwh * price_clp_kwh
-    else:
-        projected_daily_cost = DEFAULT_PROJECTED_DAILY_COST
 
     return {
         "type": "optimization_report",
