@@ -76,11 +76,14 @@ def process_alert(payload: dict) -> None:
             logger.warning("No existe regla HACCP activa para la cámara %s", chamber_id)
             return
 
-        if not validar_haccp(payload, rule):
-            logger.info("Falso positivo para cámara %s: %s", chamber_id, payload)
+        validation = validar_haccp(payload, rule)
+        if not validation["is_alert"]:
+            logger.info("Evento no validado para cámara %s: %s", chamber_id, validation["message"])
             return
 
         alert_payload = _alert_payload_from_message(payload)
+        alert_payload["severity"] = validation["severity"]
+        alert_payload["message"] = validation["message"]
         alert = _persist_generated_alert(session, alert_payload, getattr(rule, "id_rule", None))
         _persist_audit(
             session,
