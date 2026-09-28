@@ -4,8 +4,7 @@ from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Intege
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base
 
-Base = declarative_base()
-
+from database import Base
 
 class Company(Base):
     __tablename__ = "company"

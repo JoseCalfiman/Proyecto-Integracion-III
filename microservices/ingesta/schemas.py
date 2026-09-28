@@ -6,12 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class SensorDataCreate(BaseModel):
-    """Lectura de sensor recibida (por MQTT o API)."""
-
-    chamber_id: UUID
-    temperature: float = Field(ge=-50, le=50)  # °C
+    id_chamber: UUID
+    temperature: float = Field(ge=-50, le=50)
     consumption_kw: float = Field(ge=0, le=999.999)
-    recorded_at: datetime
+    timestamp: datetime
 
 
 class SensorDataRead(SensorDataCreate):
