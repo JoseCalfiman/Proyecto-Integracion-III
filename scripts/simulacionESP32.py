@@ -1,71 +1,148 @@
+#!/usr/bin/env python3
 """
-Publica datos falsos de temperatura y consumo
-eléctrico por MQTT cada 10 segundos
+Simulador de ESP32 para Smart Fridge Monitoring.
+Publica datos de 3 cámaras en MQTT cada 10 segundos.
+Compatible con el broker público test.mosquitto.org.
 """
-import os
+
 import json
-import random
 import time
+import random
+import signal
+import sys
 from datetime import datetime, timezone
+
 import paho.mqtt.client as mqtt
-from dotenv import load_dotenv
 
-load_dotenv()
-BROKER_HOST = os.getenv("MQTT_HOST_LOCAL", "localhost")
-BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
-MQTT_USER = os.getenv("MQTT_ESP32_USER", "esp32")
-MQTT_PASSWORD = os.getenv("MQTT_ESP32_PASSWORD", "1234")
+# ============================================================
+# CONFIGURACIÓN
+# ============================================================
 
-TOPIC = "sensor/raw"          
+MQTT_BROKER = "test.mosquitto.org"
+MQTT_PORT = 1883
+MQTT_CLIENT_ID = f"python-sim-{random.randint(1000, 9999)}"
+MQTT_TOPIC = "sensor/raw"
+
+# IDs de las 3 cámaras (según el MER oficial)
+CAMARAS = [
+    "44444444-4444-4444-4444-444444444444",  # Cámara Principal 01
+    "55555555-5555-5555-5555-555555555555",  # Cámara Principal 02
+    "66666666-6666-6666-6666-666666666666",  # Túnel de Enfriamiento A
+]
+
+# Frecuencia de envío (segundos)
 INTERVALO = 10
-CAMARAS = 3
 
-camaras_estado = {
-    camara_id: {
-        "temperatura": round(random.uniform(2.0, 5.0), 2),
-        "consumo_kw": round(random.uniform(0.8, 2.5), 2),
-    }
-    for camara_id in range(1, CAMARAS + 1)
+# ============================================================
+# ESTADO INICIAL (simula temperatura y consumo base)
+# ============================================================
+
+temperaturas = {
+    CAMARAS[0]: -18.0,  # Cámara congelados
+    CAMARAS[1]: 2.5,    # Cámara refrigerados
+    CAMARAS[2]: -5.0,   # Túnel de enfriamiento
 }
 
-def simular_siguiente_lectura(camara_id: int) -> dict:
-    estado = camaras_estado[camara_id]
-    estado["temperatura"] = round(estado["temperatura"] + random.uniform(-0.3, 0.3), 2)
-    estado["consumo_kw"] = round(max(0.1, estado["consumo_kw"] + random.uniform(-0.1, 0.1)), 2)
+consumos = {
+    CAMARAS[0]: 1.8,
+    CAMARAS[1]: 1.2,
+    CAMARAS[2]: 2.5,
+}
+
+# ============================================================
+# CALLBACKS MQTT
+# ============================================================
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print(f"Conectado a MQTT: {MQTT_BROKER}:{MQTT_PORT}")
+    else:
+        print(f"Error de conexión MQTT. Código: {rc}")
+
+
+def on_publish(client, userdata, mid):
+    pass  # Silencioso para no saturar la consola
+
+
+# SIMULACIÓN DE DATOS
+
+def generar_datos(camara_id):
+    """Genera datos realistas para una cámara."""
+    # Variación aleatoria de temperatura (±0.3°C)
+    temperaturas[camara_id] += random.uniform(-0.3, 0.3)
+    # Mantener en rango realista
+    temperaturas[camara_id] = round(temperaturas[camara_id], 2)
+
+    # Variación aleatoria de consumo (±0.15 kW)
+    consumos[camara_id] += random.uniform(-0.15, 0.15)
+    consumos[camara_id] = round(max(0.5, consumos[camara_id]), 2)
 
     return {
-        "camara_id": camara_id,
-        "temperatura": estado["temperatura"],
-        "consumo_kw": estado["consumo_kw"],
+        "id_chamber": camara_id,
+        "temperature": temperaturas[camara_id],
+        "consumption_kw": consumos[camara_id],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-def on_connect(client, userdata, flags, reason_code, properties=None):
-    if reason_code == 0:
-        print(f"Conectado al broker MQTT en {BROKER_HOST}:{BROKER_PORT} como {MQTT_USER}")
-    else:
-        print(f"No se pudo conectar {reason_code}")
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="simuladorESP32")
-    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+    print("=" * 60)
+    print("   SIMULADOR ESP32 - SMART FRIDGE MONITORING")
+    print("=" * 60)
+    print(f"Broker:    {MQTT_BROKER}:{MQTT_PORT}")
+    print(f"Tópico:    {MQTT_TOPIC}")
+    print(f"Cámaras:   {len(CAMARAS)}")
+    print(f"Intervalo: {INTERVALO}s")
+    print("=" * 60)
+    print()
+
+    # Configurar cliente MQTT
+    client = mqtt.Client(client_id=MQTT_CLIENT_ID)
     client.on_connect = on_connect
-    client.connect(BROKER_HOST, BROKER_PORT, keepalive=60)
-    client.loop_start()
-    print(f"Publicando datos falsos en '{TOPIC}' cada {INTERVALO} segundos\n")
+    client.on_publish = on_publish
 
     try:
-        while True:
-            for camara_id in camaras_estado:
-                payload = simular_siguiente_lectura(camara_id)
-                client.publish(TOPIC, json.dumps(payload), qos=0)
-                print(f"Publicado: {payload}")
-            time.sleep(INTERVALO)
-    except KeyboardInterrupt:
-        print("\nDetenido")
-    finally:
+        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    except Exception as e:
+        print(f"No se pudo conectar a {MQTT_BROKER}: {e}")
+        sys.exit(1)
+
+    client.loop_start()
+
+    # Manejar Ctrl+C
+    def handle_shutdown(signum, frame):
+        print("\n\nDeteniendo simulador...")
         client.loop_stop()
         client.disconnect()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
+    # Bucle principal
+    ciclo = 0
+    try:
+        while True:
+            ciclo += 1
+            print(f"\n--- Ciclo #{ciclo} ---")
+
+            for camara_id in CAMARAS:
+                datos = generar_datos(camara_id)
+                payload = json.dumps(datos)
+                client.publish(MQTT_TOPIC, payload, qos=0)
+                print(f"  Cámara {camara_id[:8]}: "
+                      f"temp={datos['temperature']}°C, "
+                      f"consumo={datos['consumption_kw']}kW")
+
+            time.sleep(INTERVALO)
+
+    except KeyboardInterrupt:
+        handle_shutdown(None, None)
+
 
 if __name__ == "__main__":
     main()
