@@ -14,9 +14,7 @@ from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
-# ============================================================
 # CONFIGURACIÓN
-# ============================================================
 
 MQTT_BROKER = "test.mosquitto.org"
 MQTT_PORT = 1883
@@ -28,30 +26,29 @@ CAMARAS = [
     "44444444-4444-4444-4444-444444444444",  # Cámara Principal 01
     "55555555-5555-5555-5555-555555555555",  # Cámara Principal 02
     "66666666-6666-6666-6666-666666666666",  # Túnel de Enfriamiento A
+    "22222222-2222-2222-2222-222222222222",  # Túnel de Enfriamiento B
 ]
 
 # Frecuencia de envío (segundos)
 INTERVALO = 10
 
-# ============================================================
 # ESTADO INICIAL (simula temperatura y consumo base)
-# ============================================================
 
 temperaturas = {
     CAMARAS[0]: -18.0,  # Cámara congelados
     CAMARAS[1]: 2.5,    # Cámara refrigerados
     CAMARAS[2]: -5.0,   # Túnel de enfriamiento
+    CAMARAS[3]: -5.0,   # Túnel de enfriamiento
 }
 
 consumos = {
     CAMARAS[0]: 1.8,
     CAMARAS[1]: 1.2,
     CAMARAS[2]: 2.5,
+    CAMARAS[3]: 2.5,
 }
 
-# ============================================================
 # CALLBACKS MQTT
-# ============================================================
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
