@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingesta
+  namespace: student-TU_USUARIO
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingesta
+  template:
+    metadata:
+      labels:
+        app: ingesta
+    spec:
+      containers:
+        - name: ingesta
+          image: TU_USUARIO_DOCKERHUB/ingesta:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: app-config

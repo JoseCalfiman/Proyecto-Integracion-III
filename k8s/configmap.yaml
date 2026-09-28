@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: student-TU_USUARIO
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
+  MQTT_BROKER_HOST: "mosquitto-service"
+  MQTT_BROKER_PORT: "1883"
+  DB_HOST: "timescaledb-service"
+  DB_PORT: "5432"
+  DB_NAME: "frigorifico"
+  KAFKA_TOPIC: "sensor.raw"
+  KAFKA_REPORT_TOPIC: "optimization.reports"
+  KAFKA_GROUP_ID: "worker-optimizacion"

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb-service
+  namespace: student-TU_USUARIO
+spec:
+  selector:
+    app: timescaledb
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP

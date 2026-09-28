@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-haccp
+  namespace: student-TU_USUARIO
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-haccp
+  template:
+    metadata:
+      labels:
+        app: worker-haccp
+    spec:
+      containers:
+        - name: worker-haccp
+          image: TU_USUARIO_DOCKERHUB/worker-haccp:latest
+          envFrom:
+            - configMapRef:
+                name: app-config
