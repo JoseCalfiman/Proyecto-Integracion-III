@@ -1,5 +1,8 @@
 import json
 import os
+from database import SessionLocal
+from models import SensorData
+from schemas import SensorDataCreate
 
 import paho.mqtt.client as mqtt
 
@@ -42,6 +45,27 @@ def procesar_payload(data: dict):
 
 client.on_connect = on_connect
 client.on_message = on_message
+
+def save_sensor_data(data: dict) -> None:
+    """Valida el payload y lo inserta en la hipertabla sensor_data."""
+    reading = SensorDataCreate(**data)  # lanza ValidationError si el payload es inválido
+ 
+    db = SessionLocal()
+    try:
+        db.add(
+            SensorData(
+                id_chamber=reading.chamber_id,
+                timestamp=reading.recorded_at,  # columna de tiempo de la hipertabla
+                temperature=reading.temperature,
+                consumption_kw=reading.consumption_kw,
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def start():
