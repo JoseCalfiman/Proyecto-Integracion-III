@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: timescaledb-pvc
-  namespace: student-TU_USUARIO
+  namespace: student-aamonsalve
 spec:
   accessModes:
     - ReadWriteOnce

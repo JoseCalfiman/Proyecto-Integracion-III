@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker-predictivo
-  namespace: student-TU_USUARIO
+  namespace: student-aamonsalve
 spec:
   replicas: 1
   selector:
@@ -14,8 +14,8 @@ spec:
         app: worker-predictivo
     spec:
       containers:
-        - name: worker-predictivo
-          image: TU_USUARIO_DOCKERHUB/worker-predictivo:latest
-          envFrom:
-            - configMapRef:
-                name: app-config
+      - name: worker-predictivo
+        image: aamonsalve/cryometric-worker-predictivo:latest
+        envFrom:
+        - configMapRef:
+            name: app-config

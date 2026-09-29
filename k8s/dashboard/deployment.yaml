@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: dashboard
-  namespace: student-TU_USUARIO
+  namespace: student-aamonsalve
 spec:
   replicas: 1
   selector:
@@ -14,7 +14,7 @@ spec:
         app: dashboard
     spec:
       containers:
-        - name: dashboard
-          image: TU_USUARIO_DOCKERHUB/dashboard:latest
-          ports:
-            - containerPort: 80
+      - name: dashboard
+        image: aamonsalve/cryometric-dashboard:latest
+        ports:
+        - containerPort: 80

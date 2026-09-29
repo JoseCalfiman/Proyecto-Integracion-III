@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker-haccp
-  namespace: student-TU_USUARIO
+  namespace: student-aamonsalve
 spec:
   replicas: 1
   selector:
@@ -14,8 +14,8 @@ spec:
         app: worker-haccp
     spec:
       containers:
-        - name: worker-haccp
-          image: TU_USUARIO_DOCKERHUB/worker-haccp:latest
-          envFrom:
-            - configMapRef:
-                name: app-config
+      - name: worker-haccp
+        image: aamonsalve/cryometric-worker-haccp:latest
+        envFrom:
+        - configMapRef:
+            name: app-config

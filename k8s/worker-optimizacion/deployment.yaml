@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker-optimizacion
-  namespace: student-TU_USUARIO
+  namespace: student-aamonsalve
 spec:
   replicas: 1
   selector:
@@ -14,8 +14,8 @@ spec:
         app: worker-optimizacion
     spec:
       containers:
-        - name: worker-optimizacion
-          image: TU_USUARIO_DOCKERHUB/worker-optimizacion:latest
-          envFrom:
-            - configMapRef:
-                name: app-config
+      - name: worker-optimizacion
+        image: aamonsalve/cryometric-worker-optimizacion:latest
+        envFrom:
+        - configMapRef:
+            name: app-config
