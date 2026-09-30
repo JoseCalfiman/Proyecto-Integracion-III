@@ -4,12 +4,19 @@ metadata:
   name: app-config
   namespace: student-aamonsalve
 data:
-  KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
-  MQTT_BROKER_HOST: "mosquitto-service"
+  # MQTT
+  MQTT_BROKER_HOST: "test.mosquitto.org"
   MQTT_BROKER_PORT: "1883"
+
+  # Kafka
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
+
+  # Base de datos
   DB_HOST: "timescaledb-service"
   DB_PORT: "5432"
   DB_NAME: "frigorifico"
-  KAFKA_TOPIC: "sensor.raw"
-  KAFKA_REPORT_TOPIC: "optimization.reports"
-  KAFKA_GROUP_ID: "worker-optimizacion"
+  DB_USER: "admin"
+  DB_PASSWORD: "admin123"
+  POSTGRES_USER: "admin"
+  POSTGRES_PASSWORD: "admin123"
+  POSTGRES_DB: "frigorifico"

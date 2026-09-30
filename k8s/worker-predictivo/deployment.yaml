@@ -13,9 +13,29 @@ spec:
       labels:
         app: worker-predictivo
     spec:
+      initContainers:
+      - name: wait-for-timescaledb
+        image: busybox:latest
+        command:
+        - sh
+        - -c
+        - |
+          echo "Esperando a TimescaleDB..."
+          until nc -z timescaledb-service 5432; do
+            echo "TimescaleDB no disponible, esperando 5s..."
+            sleep 5
+          done
+          echo "TimescaleDB disponible!"
       containers:
       - name: worker-predictivo
         image: aamonsalve/cryometric-worker-predictivo:latest
         envFrom:
         - configMapRef:
             name: app-config
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "100m"
