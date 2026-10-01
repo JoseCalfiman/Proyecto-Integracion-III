@@ -11,7 +11,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -46,26 +45,36 @@ class HaccpRule(Base):
     id_user_modified: Mapped[int | None] = mapped_column(ForeignKey("users.id_user"), nullable=True)
 
 
+class Prediction(Base):
+    __tablename__ = "predictions"
+
+    id_prediction: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+
+
 class GeneratedAlert(Base):
     __tablename__ = "generated_alerts"
 
-    alert_id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
-    chamber_id: Mapped[int] = mapped_column(ForeignKey("chambers.id_chamber"), nullable=False)
-    prediction_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("predictions.id_prediction"), nullable=True)
-    haccp_rule_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("haccp_rules.id_rule"), nullable=True)
+    id_alert: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    id_chamber: Mapped[int] = mapped_column(ForeignKey("chambers.id_chamber"), nullable=False)
+    id_prediction: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("predictions.id_prediction"), nullable=True)
+    id_haccp_rule: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("haccp_rules.id_rule"), nullable=True)
     alert_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    generation_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    id_user_acknowledged: Mapped[int | None] = mapped_column(ForeignKey("users.id_user"), nullable=True)
+    acknowledgment_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    id_user_resolved: Mapped[int | None] = mapped_column(ForeignKey("users.id_user"), nullable=True)
+    resolution_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class AlertAuditLog(Base):
-    __tablename__ = "alert_audit_log"
+class AlertAudit(Base):
+    __tablename__ = "alert_audit"
 
-    audit_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    alert_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("generated_alerts.alert_id"), nullable=False)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id_user"), nullable=True)
-    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    id_audit: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    id_alert: Mapped[int] = mapped_column(BigInteger, ForeignKey("generated_alerts.id_alert"), nullable=False)
+    id_user: Mapped[int | None] = mapped_column(ForeignKey("users.id_user"), nullable=True)
+    action: Mapped[str | None] = mapped_column(String(50), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
-    action_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    action_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

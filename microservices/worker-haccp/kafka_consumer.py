@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from crud import get_active_rule
 from haccp_validator import validar_haccp
 from kafka_producer import publish_haccp_alert
-from models import AlertAuditLog, GeneratedAlert
+from models import AlertAudit, GeneratedAlert
 
 TOPIC_ANOMALY = "sensor.anomaly"
 TOPIC_ALERTS = "haccp.alerts"
@@ -26,7 +26,7 @@ engine = create_engine(DATABASE_URL, future=True)
 
 def initialize_database() -> None:
     GeneratedAlert.__table__.create(bind=engine, checkfirst=True)
-    AlertAuditLog.__table__.create(bind=engine, checkfirst=True)
+    AlertAudit.__table__.create(bind=engine, checkfirst=True)
 
 
 def _alert_payload_from_message(payload: dict) -> dict:
@@ -44,14 +44,14 @@ def _alert_payload_from_message(payload: dict) -> dict:
 
 def _persist_generated_alert(session: Session, payload: dict, rule_id: int | None) -> GeneratedAlert:
     alert = GeneratedAlert(
-        chamber_id=payload["id_chamber"],
-        prediction_id=payload.get("id_prediction"),
-        haccp_rule_id=rule_id,
+        id_chamber=payload["id_chamber"],
+        id_prediction=payload.get("id_prediction"),
+        id_haccp_rule=rule_id,
         alert_type="haccp_violation",
         severity=payload.get("severity", "warning"),
         status="active",
         message=payload.get("message", "Alerta HACCP detectada"),
-        generated_at=datetime.now(timezone.utc),
+        generation_date=datetime.now(timezone.utc),
     )
     session.add(alert)
     session.flush()
@@ -59,9 +59,9 @@ def _persist_generated_alert(session: Session, payload: dict, rule_id: int | Non
 
 
 def _persist_audit(session: Session, alert_id: int, action: str, detail: str) -> None:
-    audit = AlertAuditLog(
-        alert_id=alert_id,
-        user_id=None,
+    audit = AlertAudit(
+        id_alert=alert_id,
+        id_user=None,
         action=action,
         detail=detail,
     )
@@ -91,7 +91,7 @@ def process_alert(payload: dict) -> None:
         alert = _persist_generated_alert(session, alert_payload, getattr(rule, "id_rule", None))
         _persist_audit(
             session,
-            alert.alert_id,
+            alert.id_alert,
             "created",
             f"Alerta HACCP validada para cámara {chamber_id}.",
         )
