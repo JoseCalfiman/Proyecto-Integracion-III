@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from crud import get_active_rule
 from haccp_validator import validar_haccp
 from kafka_producer import publish_haccp_alert
-from models import AlertAudit, GeneratedAlert
+from models import AlertAuditLog, GeneratedAlert
 
 TOPIC_ANOMALY = "sensor.anomaly"
 TOPIC_ALERTS = "haccp.alerts"
@@ -22,6 +22,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 engine = create_engine(DATABASE_URL, future=True)
+
+
+def initialize_database() -> None:
+    AlertAuditLog.__table__.create(bind=engine, checkfirst=True)
 
 
 def _alert_payload_from_message(payload: dict) -> dict:
@@ -54,12 +58,11 @@ def _persist_generated_alert(session: Session, payload: dict, rule_id: int | Non
 
 
 def _persist_audit(session: Session, alert_id: int, action: str, detail: str) -> None:
-    audit = AlertAudit(
-        id_alert=alert_id,
-        id_user=None,
+    audit = AlertAuditLog(
+        alert_id=alert_id,
+        user_id=None,
         action=action,
         detail=detail,
-        action_date=datetime.now(timezone.utc),
     )
     session.add(audit)
 
@@ -104,6 +107,7 @@ def process_alert(payload: dict) -> None:
 
 
 def consume_anomalies() -> None:
+    initialize_database()
     consumer = Consumer(
         {
             "bootstrap.servers": BOOTSTRAP_SERVERS,

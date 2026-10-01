@@ -5,7 +5,8 @@ Responsable: Eduardo Domínguez
 Worker que consume alertas predictivas desde Kafka en el tópico `sensor.anomaly`,
 las valida contra la regla HACCP activa de cada cámara y, si cumplen las
 condiciones, publica la alerta final en `haccp.alerts` y la persiste en la
-tabla `generated_alerts` junto con la auditoría correspondiente.
+tabla `generated_alerts` junto con la auditoría correspondiente en
+`alert_audit_log`.
 
 ## Reglas HACCP y MER oficial
 
@@ -25,7 +26,12 @@ Estas convenciones se aplican en `haccp_validator.py`, `crud.py` y `models.py`.
 4. Si la validación pasa:
    - guarda la alerta en `generated_alerts`
    - publica el evento en `haccp.alerts`
-   - registra la acción en `alert_audit`
+   - registra la acción en `alert_audit_log`
+
+Al iniciar el consumidor, SQLAlchemy crea `alert_audit_log` en PostgreSQL si no
+existe. La tabla guarda `audit_id`, `alert_id`, `user_id`, `action`, `detail` y
+`action_at`; las referencias de alerta y usuario apuntan a `generated_alerts` y
+`users`.
 5. Si la validación falla, se registra como `falso positivo`.
 
 ## Archivos clave

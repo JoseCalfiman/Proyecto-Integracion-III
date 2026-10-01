@@ -1,7 +1,18 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -53,12 +64,12 @@ class GeneratedAlert(Base):
     resolution_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class AlertAudit(Base):
-    __tablename__ = "alert_audit"
+class AlertAuditLog(Base):
+    __tablename__ = "alert_audit_log"
 
-    id_audit: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    id_alert: Mapped[int] = mapped_column(BigInteger, ForeignKey("generated_alerts.id_alert"), nullable=False)
-    id_user: Mapped[int | None] = mapped_column(ForeignKey("users.id_user"), nullable=True)
-    action: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    audit_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    alert_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("generated_alerts.id_alert"), nullable=False)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id_user"), nullable=True)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
-    action_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    action_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
