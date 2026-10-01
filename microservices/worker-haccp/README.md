@@ -32,6 +32,10 @@ Al iniciar el consumidor, SQLAlchemy crea `alert_audit_log` en PostgreSQL si no
 existe. La tabla guarda `audit_id`, `alert_id`, `user_id`, `action`, `detail` y
 `action_at`; las referencias de alerta y usuario apuntan a `generated_alerts` y
 `users`.
+
+También crea `generated_alerts` si no existe. Cada alerta persiste `alert_id`,
+`chamber_id`, `prediction_id`, `haccp_rule_id`, `alert_type`, `severity`, `status`,
+`message` y `generated_at`.
 5. Si la validación falla, se registra como `falso positivo`.
 
 ## Archivos clave

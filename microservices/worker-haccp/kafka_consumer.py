@@ -25,6 +25,7 @@ engine = create_engine(DATABASE_URL, future=True)
 
 
 def initialize_database() -> None:
+    GeneratedAlert.__table__.create(bind=engine, checkfirst=True)
     AlertAuditLog.__table__.create(bind=engine, checkfirst=True)
 
 
@@ -43,14 +44,14 @@ def _alert_payload_from_message(payload: dict) -> dict:
 
 def _persist_generated_alert(session: Session, payload: dict, rule_id: int | None) -> GeneratedAlert:
     alert = GeneratedAlert(
-        id_chamber=payload["id_chamber"],
-        id_prediction=payload.get("id_prediction"),
-        id_haccp_rule=rule_id,
+        chamber_id=payload["id_chamber"],
+        prediction_id=payload.get("id_prediction"),
+        haccp_rule_id=rule_id,
         alert_type="haccp_violation",
         severity=payload.get("severity", "warning"),
         status="active",
         message=payload.get("message", "Alerta HACCP detectada"),
-        generation_date=datetime.now(timezone.utc),
+        generated_at=datetime.now(timezone.utc),
     )
     session.add(alert)
     session.flush()
@@ -90,7 +91,7 @@ def process_alert(payload: dict) -> None:
         alert = _persist_generated_alert(session, alert_payload, getattr(rule, "id_rule", None))
         _persist_audit(
             session,
-            alert.id_alert,
+            alert.alert_id,
             "created",
             f"Alerta HACCP validada para cámara {chamber_id}.",
         )
