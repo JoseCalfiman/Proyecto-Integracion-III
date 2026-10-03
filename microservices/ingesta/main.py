@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from routes import chambers
 
 app = FastAPI(title="Ingesta - Smart Fridge Monitoring")
 
+app.include_router(chambers.router, prefix="/api/v1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
