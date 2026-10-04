@@ -2,7 +2,7 @@ import uuid
 
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, relationship
 
 from database import Base
 
@@ -81,3 +81,51 @@ class IngestionLog(Base):
     processing_status = Column(String(20), nullable=False)  # success | error | pending
     error_message = Column(Text)
     reception_date = Column(DateTime(timezone=True), server_default=func.now())
+
+class GeneratedAlert(Base):
+    __tablename__ = "generated_alerts"
+
+    id_alert = Column(BigInteger, primary_key=True, autoincrement=True)
+    id_chamber = Column(UUID(as_uuid=True), ForeignKey("chambers.id_chamber"))
+    # Sin FK porque ingesta no tiene los modelos Prediction ni HaccpRule
+    id_prediction = Column(BigInteger)
+    id_haccp_rule = Column(BigInteger)
+    alert_type = Column(String(50))
+    severity = Column(String(20), nullable=False)
+    status = Column(String(20), nullable=False, default="active")
+    message = Column(Text)
+    generation_date = Column(DateTime(timezone=True), server_default=func.now())
+    id_user_acknowledged = Column(UUID(as_uuid=True), ForeignKey("users.id_user"))
+    acknowledgment_date = Column(DateTime(timezone=True))
+    id_user_resolved = Column(UUID(as_uuid=True), ForeignKey("users.id_user"))
+    resolution_date = Column(DateTime(timezone=True))
+
+    chamber = relationship("Chamber", lazy="joined")
+
+    @property
+    def chamber_name(self):
+        return self.chamber.name if self.chamber else None
+
+
+class AlertAudit(Base):
+    __tablename__ = "alert_audit"
+
+    id_audit = Column(BigInteger, primary_key=True, autoincrement=True)
+    id_alert = Column(BigInteger, ForeignKey("generated_alerts.id_alert"))
+    id_user = Column(UUID(as_uuid=True), ForeignKey("users.id_user"))
+    action = Column(String(50))
+    detail = Column(Text)
+    action_date = Column(DateTime(timezone=True), server_default=func.now())
+
+class HaccpRule(Base):
+    __tablename__ = "haccp_rules"
+
+    id_rule = Column(BigInteger, primary_key=True, autoincrement=True)
+    id_chamber = Column(UUID(as_uuid=True), ForeignKey("chambers.id_chamber"))
+    tolerance_time_min = Column(Integer)
+    active = Column(Boolean, default=True)
+    review_date = Column(DateTime(timezone=True), server_default=func.now())
+    max_absolute_temp = Column(Numeric(5, 2))
+    min_absolute_temp = Column(Numeric(5, 2))
+    severity = Column(String(20), default="medium")
+    id_user_modified = Column(UUID(as_uuid=True), ForeignKey("users.id_user"))

@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SensorDataCreate(BaseModel):
@@ -42,3 +42,69 @@ class ChamberRead(BaseModel):
     location: Optional[str] = None
     active: Optional[bool] = None
     created_at: Optional[datetime] = None
+
+class AlertAction(BaseModel):
+    id_user: UUID  # temporal: saldrá del JWT cuando exista auth
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class AlertRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_alert: int
+    id_chamber: Optional[UUID] = None
+    chamber_name: Optional[str] = None
+    id_prediction: Optional[int] = None
+    id_haccp_rule: Optional[int] = None
+    alert_type: Optional[str] = None
+    severity: str
+    status: str
+    message: Optional[str] = None
+    generation_date: Optional[datetime] = None
+    id_user_acknowledged: Optional[UUID] = None
+    acknowledgment_date: Optional[datetime] = None
+    id_user_resolved: Optional[UUID] = None
+    resolution_date: Optional[datetime] = None
+
+
+class AlertAuditRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_audit: int
+    id_alert: int
+    id_user: Optional[UUID] = None
+    action: Optional[str] = None
+    detail: Optional[str] = None
+    action_date: Optional[datetime] = None
+
+HaccpSeverity = Literal["low", "medium", "high", "critical"]
+
+
+class HaccpRuleUpdate(BaseModel):
+    max_absolute_temp: float = Field(ge=-50, le=50)
+    min_absolute_temp: float = Field(ge=-50, le=50)
+    tolerance_time_min: int = Field(ge=1, le=1440)
+    severity: HaccpSeverity = "medium"
+    active: bool = True
+    id_user_modified: Optional[UUID] = None  # temporal: saldrá del JWT
+
+    @model_validator(mode="after")
+    def check_range(self):
+        if self.min_absolute_temp >= self.max_absolute_temp:
+            raise ValueError("min_absolute_temp debe ser menor que max_absolute_temp")
+        return self
+
+
+class HaccpRuleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_rule: Optional[int] = None
+    id_chamber: UUID
+    chamber_name: Optional[str] = None
+    max_absolute_temp: float
+    min_absolute_temp: float
+    tolerance_time_min: int
+    severity: str
+    active: bool
+    review_date: Optional[datetime] = None
+    id_user_modified: Optional[UUID] = None
