@@ -12,6 +12,13 @@ class SensorDataCreate(BaseModel):
     timestamp: datetime
 
 
+class DashboardLive(BaseModel):
+    active_chambers: int
+    active_alerts: int
+    total_consumption_kw: float
+    estimated_savings_clp: float
+
+
 class SensorDataRead(SensorDataCreate):
     """Lectura tal como se devuelve desde la base de datos."""
 

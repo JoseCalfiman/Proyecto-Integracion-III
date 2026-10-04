@@ -129,3 +129,18 @@ class HaccpRule(Base):
     min_absolute_temp = Column(Numeric(5, 2))
     severity = Column(String(20), default="medium")
     id_user_modified = Column(UUID(as_uuid=True), ForeignKey("users.id_user"))
+
+
+class SavingRecommendation(Base):
+    __tablename__ = "saving_recommendation"
+
+    id_recommendation = Column(BigInteger, primary_key=True, autoincrement=True)
+    id_chamber = Column(UUID(as_uuid=True), ForeignKey("chambers.id_chamber"))
+    id_price = Column(Integer, ForeignKey("energy_price.id_price"))
+    action = Column(String(100))
+    expected_saving_pct = Column(Numeric(6, 3))
+    expected_saving_amount = Column(Numeric(14, 4))
+    rationale = Column(Text)
+    status = Column(String(20), default="pending")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    applied_at = Column(DateTime(timezone=True))

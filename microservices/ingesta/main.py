@@ -3,8 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes import chambers, alerts
 from routes import haccp, dashboard
 
-
-
 app = FastAPI(title="Ingesta - Smart Fridge Monitoring")
 
 app.include_router(dashboard.router, prefix="/api/v1")
