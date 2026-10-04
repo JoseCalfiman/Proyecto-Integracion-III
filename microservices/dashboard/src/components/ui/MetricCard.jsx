@@ -8,6 +8,11 @@ const MetricCard = ({ title, value, unit, icon: Icon, color = 'green', borderCol
     blue: 'text-blue-600 bg-blue-50',
   };
 
+  // Si value es undefined, null o NaN, mostramos 0
+  const displayValue = value === undefined || value === null || Number.isNaN(value)
+    ? 0
+    : value;
+
   return (
     <div className={`bg-white p-6 rounded-lg shadow-md ${borderColor || ''}`}>
       <div className="flex items-start justify-between">
@@ -16,7 +21,7 @@ const MetricCard = ({ title, value, unit, icon: Icon, color = 'green', borderCol
             {title}
           </p>
           <div className="flex items-baseline gap-1 mt-2">
-            <p className="text-4xl font-bold text-gray-800">{value}</p>
+            <p className="text-4xl font-bold text-gray-800">{displayValue}</p>
             {unit && <p className="text-lg text-gray-500">{unit}</p>}
           </div>
         </div>

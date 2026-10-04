@@ -4,14 +4,18 @@ metadata:
   name: app-config
   namespace: student-aamonsalve
 data:
-  # MQTT
   MQTT_BROKER_HOST: "test.mosquitto.org"
   MQTT_BROKER_PORT: "1883"
-
-  # Kafka
   KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
 
-  # Base de datos
+  # Variables que Diego usa (PG*)
+  PGHOST: "timescaledb-service"
+  PGPORT: "5432"
+  PGDATABASE: "frigorifico"
+  PGUSER: "admin"
+  PGPASSWORD: "admin123"
+
+  # Mantener las DB_* por compatibilidad
   DB_HOST: "timescaledb-service"
   DB_PORT: "5432"
   DB_NAME: "frigorifico"

@@ -3,15 +3,15 @@ import { Camera, AlertTriangle, Zap, TrendingUp } from 'lucide-react';
 import MetricCard from '../../components/ui/MetricCard';
 import TemperatureChart from '../../components/charts/TemperatureChart';
 import ConsumptionChart from '../../components/charts/ConsumptionChart';
-import { getDashboardLive, getCamaras } from '../../api/dashboard';
+import { getDashboardLive } from '../../api/dashboard';
 
 const Dashboard = () => {
   const [ultimaActualizacion, setUltimaActualizacion] = useState(new Date());
   const [datos, setDatos] = useState({
-    camaras_activas: 0,
-    alertas_activas: 0,
-    consumo_total_kw: 0,
-    ahorro_estimado_clp: 0,
+    active_chambers: 0,
+    active_alerts: 0,
+    total_consumption_kw: 0,
+    estimated_savings_clp: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -52,7 +52,7 @@ const Dashboard = () => {
       {/* Error */}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg mb-4 text-sm">
-          {error} (mostrando datos de ejemplo)
+          {error}
         </div>
       )}
 
@@ -60,27 +60,27 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <MetricCard
           title="Total Cámaras"
-          value={loading ? '...' : datos.camaras_activas}
+          value={loading ? '...' : datos.active_chambers}
           icon={Camera}
           color="green"
         />
         <MetricCard
           title="Alertas Activas"
-          value={loading ? '...' : datos.alertas_activas}
+          value={loading ? '...' : datos.active_alerts}
           icon={AlertTriangle}
           color="red"
           borderColor="border-l-4 border-red-500"
         />
         <MetricCard
           title="Consumo Total"
-          value={loading ? '...' : datos.consumo_total_kw}
+          value={loading ? '...' : datos.total_consumption_kw?.toFixed(2)}
           unit="kW"
           icon={Zap}
           color="yellow"
         />
         <MetricCard
           title="Ahorro Estimado"
-          value={loading ? '...' : `$${datos.ahorro_estimado_clp?.toLocaleString('es-CL')}`}
+          value={loading ? '...' : `$${(datos.estimated_savings_clp || 0).toLocaleString('es-CL')}`}
           unit="CLP"
           icon={TrendingUp}
           color="green"
