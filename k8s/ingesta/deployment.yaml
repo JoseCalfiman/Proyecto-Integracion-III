@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingesta
+  namespace: student-aamonsalve
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingesta
+  template:
+    metadata:
+      labels:
+        app: ingesta
+    spec:
+      containers:
+      - name: ingesta
+        image: aamonsalve/cryometric-ingesta:latest
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: app-config
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "100m"

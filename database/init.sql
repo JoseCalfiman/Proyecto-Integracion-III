@@ -1,281 +1,229 @@
--- =====================================================================
--- Cold-Chain / HACCP Monitoring System — PostgreSQL Schema
--- Translated from Spanish ER diagram (MER) to English + PostgreSQL DDL
--- =====================================================================
--- Notes on translation choices:
---   camaras            -> chambers        (cold storage / refrigeration chambers)
---   empresas           -> companies
---   usuarios           -> users
---   sensores           -> sensors
---   alertas_generadas  -> generated_alerts
---   predicciones_generadas -> generated_predictions
---   consumo_predicho   -> predicted_consumption
---   reglas_haccp       -> haccp_rules
---   log_ingesta        -> ingestion_log
---   auditoria_alertas  -> alert_audit_log
---   conversaciones_ia  -> ai_conversations
---   mensajes_ia        -> ai_messages
---   precio_energia     -> energy_price
---   saving_recommendation -> saving_recommendations
---   tokens_revocados   -> revoked_tokens
---   "timestamp" is a reserved word in SQL, renamed to recorded_at
--- =====================================================================
+-- ============================================================
+-- MER OFICIAL - SMART FRIDGE MONITORING
+-- ============================================================
 
-BEGIN;
+-- 1. Tablas de configuración
+CREATE TABLE company (
+  id_company UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tax_id VARCHAR(12) NOT NULL UNIQUE,
+  name VARCHAR(150),
+  active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
--- ---------------------------------------------------------------------
--- roles
--- ---------------------------------------------------------------------
 CREATE TABLE roles (
-    role_id     SERIAL PRIMARY KEY,
-    role_name   VARCHAR(50) NOT NULL UNIQUE
+  id_role SERIAL PRIMARY KEY,
+  role_name VARCHAR(30) NOT NULL UNIQUE
 );
 
--- ---------------------------------------------------------------------
--- companies (empresas)
--- ---------------------------------------------------------------------
-CREATE TABLE companies (
-    company_id  SERIAL PRIMARY KEY,
-    name        VARCHAR(150) NOT NULL,
-    tax_id      VARCHAR(20)  NOT NULL UNIQUE,   -- RUT
-    address     VARCHAR(200),
-    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
--- ---------------------------------------------------------------------
--- users (usuarios)
--- ---------------------------------------------------------------------
 CREATE TABLE users (
-    user_id         SERIAL PRIMARY KEY,
-    company_id      INT NOT NULL REFERENCES companies(company_id),
-    role_id         INT NOT NULL REFERENCES roles(role_id),
-    name            VARCHAR(150) NOT NULL,
-    email           VARCHAR(150) NOT NULL UNIQUE,
-    password_hash   VARCHAR(255) NOT NULL,
-    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    last_login_at   TIMESTAMP
+  id_user UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id_company UUID REFERENCES company(id_company) ON DELETE CASCADE,
+  id_role INT REFERENCES roles(id_role),
+  email VARCHAR(150) NOT NULL UNIQUE,
+  password_hash VARCHAR(255),
+  name VARCHAR(100),
+  active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ---------------------------------------------------------------------
--- chambers (camaras)
--- ---------------------------------------------------------------------
 CREATE TABLE chambers (
-    chamber_id          SERIAL PRIMARY KEY,
-    company_id          INT NOT NULL REFERENCES companies(company_id),
-    name                VARCHAR(150) NOT NULL,
-    location            VARCHAR(200),
-    operating_max_temp  NUMERIC(6,2),
-    operating_min_temp  NUMERIC(6,2),
-    status              VARCHAR(30) NOT NULL DEFAULT 'active',
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+  id_chamber UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id_company UUID REFERENCES company(id_company) ON DELETE CASCADE,
+  name VARCHAR(100),
+  location VARCHAR(200),
+  active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ---------------------------------------------------------------------
--- sensors (sensores)
--- ---------------------------------------------------------------------
 CREATE TABLE sensors (
-    sensor_id           SERIAL PRIMARY KEY,
-    chamber_id          INT NOT NULL REFERENCES chambers(chamber_id),
-    sensor_type         VARCHAR(50) NOT NULL,
-    mqtt_identifier      VARCHAR(150) NOT NULL UNIQUE,
-    model               VARCHAR(100),
-    status              VARCHAR(30) NOT NULL DEFAULT 'active',
-    installation_date   TIMESTAMP NOT NULL DEFAULT NOW()
+  id_sensor BIGSERIAL PRIMARY KEY,
+  id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
+  sensor_type VARCHAR(50),
+  mqtt_identifier VARCHAR(100),
+  model VARCHAR(50),
+  mcu_id VARCHAR(50),
+  firmware VARCHAR(50),
+  last_calibration DATE,
+  status VARCHAR(20) DEFAULT 'active',
+  installation_date TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ---------------------------------------------------------------------
--- sensor_data (time-series readings)
--- ---------------------------------------------------------------------
+-- 2. Series de tiempo (TimescaleDB)
 CREATE TABLE sensor_data (
-    data_id         BIGSERIAL,
-    recorded_at     TIMESTAMP NOT NULL,
-    chamber_id      INT NOT NULL REFERENCES chambers(chamber_id),
-    sensor_id       INT NOT NULL REFERENCES sensors(sensor_id),
-    temperature     NUMERIC(6,2),
-    consumption_kw  NUMERIC(10,3),
-    inserted_at     TIMESTAMP NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (data_id, recorded_at)
+  id_data BIGSERIAL,
+  timestamp TIMESTAMPTZ NOT NULL,
+  id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
+  id_sensor BIGINT REFERENCES sensors(id_sensor) ON DELETE CASCADE,
+  insertion_date TIMESTAMPTZ DEFAULT NOW(),
+  temperature NUMERIC(5,2),
+  consumption_kw NUMERIC(6,3),
+  PRIMARY KEY (id_data, timestamp)
 );
-CREATE INDEX idx_sensor_data_chamber ON sensor_data(chamber_id);
-CREATE INDEX idx_sensor_data_sensor  ON sensor_data(sensor_id);
 
--- ---------------------------------------------------------------------
--- haccp_rules (reglas_haccp)
--- ---------------------------------------------------------------------
+SELECT create_hypertable('sensor_data', 'timestamp');
+
+-- 3. Reglas HACCP
 CREATE TABLE haccp_rules (
-    rule_id                 SERIAL PRIMARY KEY,
-    chamber_id              INT NOT NULL REFERENCES chambers(chamber_id),
-    absolute_max_temp       NUMERIC(6,2) NOT NULL,
-    absolute_min_temp       NUMERIC(6,2) NOT NULL,
-    tolerance_time_min      INT NOT NULL,
-    is_active               BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at              TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at              TIMESTAMP,
-    modified_by_user_id     INT REFERENCES users(user_id)
+  id_rule BIGSERIAL PRIMARY KEY,
+  id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
+  tolerance_time_min INT,
+  active BOOLEAN DEFAULT TRUE,
+  review_date TIMESTAMPTZ DEFAULT NOW(),
+  max_absolute_temp NUMERIC(5,2),
+  min_absolute_temp NUMERIC(5,2),
+  severity VARCHAR(20) DEFAULT 'medium'
+    CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  id_user_modified UUID REFERENCES users(id_user)
 );
 
--- ---------------------------------------------------------------------
--- generated_predictions (predicciones_generadas)
--- ---------------------------------------------------------------------
-CREATE TABLE generated_predictions (
-    prediction_id           BIGSERIAL PRIMARY KEY,
-    chamber_id              INT NOT NULL REFERENCES chambers(chamber_id),
-    calculated_slope        NUMERIC(10,4),
-    projected_temperature   NUMERIC(6,2),
-    remaining_time_min      NUMERIC(10,2),
-    risk_level              VARCHAR(30),
-    calculated_at           TIMESTAMP NOT NULL DEFAULT NOW()
+-- 4. Predicciones
+CREATE TABLE predictions (
+  id_prediction BIGSERIAL PRIMARY KEY,
+  id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
+  calculated_slope NUMERIC(8,4),
+  projected_temperature NUMERIC(5,2),
+  remaining_time_min NUMERIC(8,2),
+  risk_level VARCHAR(20) NOT NULL CHECK (risk_level IN ('low', 'medium', 'high', 'critical')),
+  calculation_date TIMESTAMPTZ DEFAULT NOW(),
+  id_worker VARCHAR(50)
 );
 
--- ---------------------------------------------------------------------
--- generated_alerts (alertas_generadas)
--- ---------------------------------------------------------------------
+-- 5. Alertas
 CREATE TABLE generated_alerts (
-    alert_id                BIGSERIAL PRIMARY KEY,
-    chamber_id              INT NOT NULL REFERENCES chambers(chamber_id),
-    prediction_id           BIGINT REFERENCES generated_predictions(prediction_id),
-    haccp_rule_id           INT REFERENCES haccp_rules(rule_id),
-    alert_type              VARCHAR(50) NOT NULL,
-    severity                VARCHAR(30) NOT NULL,
-    status                  VARCHAR(30) NOT NULL DEFAULT 'open',
-    message                 VARCHAR(500),
-    generated_at            TIMESTAMP NOT NULL DEFAULT NOW(),
-    acknowledged_by_user_id INT REFERENCES users(user_id),
-    acknowledged_at         TIMESTAMP,
-    resolved_by_user_id     INT REFERENCES users(user_id),
-    resolved_at             TIMESTAMP
+  id_alert BIGSERIAL PRIMARY KEY,
+  id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
+  id_prediction BIGINT REFERENCES predictions(id_prediction) ON DELETE SET NULL,
+  id_haccp_rule BIGINT REFERENCES haccp_rules(id_rule) ON DELETE SET NULL,
+  alert_type VARCHAR(50),
+  severity VARCHAR(20) NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'acknowledged', 'resolved')),
+  message TEXT,
+  generation_date TIMESTAMPTZ DEFAULT NOW(),
+  id_user_acknowledged UUID REFERENCES users(id_user),
+  acknowledgment_date TIMESTAMPTZ,
+  id_user_resolved UUID REFERENCES users(id_user),
+  resolution_date TIMESTAMPTZ
 );
 
--- ---------------------------------------------------------------------
--- alert_audit_log (auditoria_alertas)
--- ---------------------------------------------------------------------
-CREATE TABLE alert_audit_log (
-    audit_id    BIGSERIAL PRIMARY KEY,
-    alert_id    BIGINT NOT NULL REFERENCES generated_alerts(alert_id),
-    user_id     INT NOT NULL REFERENCES users(user_id),
-    action      VARCHAR(50) NOT NULL,
-    detail      VARCHAR(500),
-    action_at   TIMESTAMP NOT NULL DEFAULT NOW()
+-- 6. Auditoría de alertas
+CREATE TABLE alert_audit (
+  id_audit BIGSERIAL PRIMARY KEY,
+  id_alert BIGINT REFERENCES generated_alerts(id_alert) ON DELETE CASCADE,
+  id_user UUID REFERENCES users(id_user),
+  action VARCHAR(50),
+  detail TEXT,
+  action_date TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ---------------------------------------------------------------------
--- predicted_consumption (consumo_predicho)
--- ---------------------------------------------------------------------
-CREATE TABLE predicted_consumption (
-    consumption_prediction_id  BIGSERIAL PRIMARY KEY,
-    chamber_id                 INT NOT NULL REFERENCES chambers(chamber_id),
-    prediction_date             DATE NOT NULL,
-    predicted_consumption_kw   NUMERIC(10,3),
-    generated_at                TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
--- ---------------------------------------------------------------------
--- energy_price (precio_energia)
--- ---------------------------------------------------------------------
+-- 7. Precio de energía
 CREATE TABLE energy_price (
-    price_id     SERIAL PRIMARY KEY,
-    price_kwh    NUMERIC(10,4) NOT NULL,
-    source       VARCHAR(100),
-    queried_at   TIMESTAMP NOT NULL DEFAULT NOW()
+  id_price SERIAL PRIMARY KEY,
+  price_kwh NUMERIC(10,4) NOT NULL,
+  source VARCHAR(100),
+  queried_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ---------------------------------------------------------------------
--- saving_recommendations (saving_recommendation)
--- ---------------------------------------------------------------------
-CREATE TABLE saving_recommendations (
-    recommendation_id  BIGSERIAL PRIMARY KEY,
-    company_id          INT NOT NULL REFERENCES companies(company_id),
-    chamber_id          INT NOT NULL REFERENCES chambers(chamber_id),
-    price_id             INT REFERENCES energy_price(price_id),
-    action               VARCHAR(150) NOT NULL,
-    savings_percentage  NUMERIC(5,2),
-    amount_clp          NUMERIC(12,2),
-    justification        TEXT,
-    status               VARCHAR(30) NOT NULL DEFAULT 'pending',
-    generated_at          TIMESTAMP NOT NULL DEFAULT NOW()
+-- 8. Consumo predicho
+CREATE TABLE predicted_consumption (
+  id_consumption_prediction BIGSERIAL PRIMARY KEY,
+  id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
+  prediction_date DATE,
+  predicted_consumption_kw NUMERIC(8,3),
+  generation_date TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ---------------------------------------------------------------------
--- reports (reportes)
--- ---------------------------------------------------------------------
-CREATE TABLE reports (
-    report_id           SERIAL PRIMARY KEY,
-    company_id           INT NOT NULL REFERENCES companies(company_id),
-    user_id               INT NOT NULL REFERENCES users(user_id),
-    report_type           VARCHAR(50) NOT NULL,
-    format                VARCHAR(20) NOT NULL,
-    range_start_date      DATE,
-    range_end_date         DATE,
-    file_path              VARCHAR(300),
-    generated_at            TIMESTAMP NOT NULL DEFAULT NOW()
+-- 9. Recomendaciones de ahorro
+CREATE TABLE saving_recommendation (
+  id_recommendation BIGSERIAL PRIMARY KEY,
+  id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
+  id_price INT REFERENCES energy_price(id_price),
+  action VARCHAR(100),
+  expected_saving_pct NUMERIC(6,3),
+  expected_saving_amount NUMERIC(14,4),
+  rationale TEXT,
+  status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'discarded', 'expired')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  applied_at TIMESTAMPTZ
 );
 
--- ---------------------------------------------------------------------
--- ai_conversations (conversaciones_ia)
--- ---------------------------------------------------------------------
-CREATE TABLE ai_conversations (
-    conversation_id       SERIAL PRIMARY KEY,
-    user_id                INT NOT NULL REFERENCES users(user_id),
-    chamber_id             INT REFERENCES chambers(chamber_id),
-    started_at              TIMESTAMP NOT NULL DEFAULT NOW(),
-    last_activity_at        TIMESTAMP
+-- 10. Preferencias de usuario
+CREATE TABLE user_preferences (
+  id_preference BIGSERIAL PRIMARY KEY,
+  id_user UUID REFERENCES users(id_user) ON DELETE CASCADE UNIQUE,
+  idioma VARCHAR(10) DEFAULT 'es-CL',
+  zona_horaria VARCHAR(50) DEFAULT 'America/Santiago',
+  unidad_temp VARCHAR(10) DEFAULT 'celsius',
+  timeout_min INT DEFAULT 30,
+  notify_critical BOOLEAN DEFAULT TRUE,
+  notify_warning BOOLEAN DEFAULT TRUE,
+  notify_info BOOLEAN DEFAULT FALSE,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ---------------------------------------------------------------------
--- ai_messages (mensajes_ia)
--- ---------------------------------------------------------------------
-CREATE TABLE ai_messages (
-    message_id       BIGSERIAL PRIMARY KEY,
-    conversation_id   INT NOT NULL REFERENCES ai_conversations(conversation_id),
-    sender             VARCHAR(20) NOT NULL,   -- e.g. 'user' / 'assistant'
-    content             TEXT NOT NULL,
-    sent_at              TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
--- ---------------------------------------------------------------------
--- revoked_tokens (tokens_revocados)
--- ---------------------------------------------------------------------
-CREATE TABLE revoked_tokens (
-    token_id                    SERIAL PRIMARY KEY,
-    user_id                       INT NOT NULL REFERENCES users(user_id),
-    token_jti                     VARCHAR(255) NOT NULL UNIQUE,
-    revocation_date                TIMESTAMP NOT NULL DEFAULT NOW(),
-    original_expiration_date       TIMESTAMP
-);
-
--- ---------------------------------------------------------------------
--- ingestion_log (log_ingesta)
--- ---------------------------------------------------------------------
+-- 11. Log de ingesta
 CREATE TABLE ingestion_log (
-    log_id                 BIGSERIAL PRIMARY KEY,
-    chamber_id              INT NOT NULL REFERENCES chambers(chamber_id),
-    received_payload         TEXT,
-    processing_status        VARCHAR(30) NOT NULL,
-    error_message             VARCHAR(500),
-    received_at                TIMESTAMP NOT NULL DEFAULT NOW()
+  id_log BIGSERIAL PRIMARY KEY,
+  id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
+  received_payload TEXT,
+  processing_status VARCHAR(20) NOT NULL CHECK (processing_status IN ('success', 'error', 'pending')),
+  error_message TEXT,
+  reception_date TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ---------------------------------------------------------------------
--- Helpful indexes on foreign keys not already covered above
--- ---------------------------------------------------------------------
-CREATE INDEX idx_users_company            ON users(company_id);
-CREATE INDEX idx_users_role                ON users(role_id);
-CREATE INDEX idx_chambers_company          ON chambers(company_id);
-CREATE INDEX idx_sensors_chamber           ON sensors(chamber_id);
-CREATE INDEX idx_haccp_rules_chamber       ON haccp_rules(chamber_id);
-CREATE INDEX idx_generated_predictions_chamber ON generated_predictions(chamber_id);
-CREATE INDEX idx_generated_alerts_chamber  ON generated_alerts(chamber_id);
-CREATE INDEX idx_generated_alerts_prediction ON generated_alerts(prediction_id);
-CREATE INDEX idx_alert_audit_log_alert     ON alert_audit_log(alert_id);
-CREATE INDEX idx_predicted_consumption_chamber ON predicted_consumption(chamber_id);
-CREATE INDEX idx_saving_recommendations_company ON saving_recommendations(company_id);
-CREATE INDEX idx_saving_recommendations_chamber ON saving_recommendations(chamber_id);
-CREATE INDEX idx_reports_company           ON reports(company_id);
-CREATE INDEX idx_ai_conversations_user     ON ai_conversations(user_id);
-CREATE INDEX idx_ai_messages_conversation  ON ai_messages(conversation_id);
-CREATE INDEX idx_revoked_tokens_user       ON revoked_tokens(user_id);
-CREATE INDEX idx_ingestion_log_chamber     ON ingestion_log(chamber_id);
+-- 12. Reportes
+CREATE TABLE reports (
+  id_report BIGSERIAL PRIMARY KEY,
+  id_company UUID REFERENCES company(id_company) ON DELETE CASCADE,
+  id_user UUID REFERENCES users(id_user),
+  report_type VARCHAR(50),
+  format VARCHAR(20),
+  range_start_date DATE,
+  range_end_date DATE,
+  file_path VARCHAR(255),
+  generation_date TIMESTAMPTZ DEFAULT NOW()
+);
 
-COMMIT;
+-- 13. Conversaciones con IA
+CREATE TABLE conversations (
+  id_conversation BIGSERIAL PRIMARY KEY,
+  id_user UUID REFERENCES users(id_user) ON DELETE CASCADE,
+  id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE SET NULL,
+  start_date TIMESTAMPTZ DEFAULT NOW(),
+  last_activity_date TIMESTAMPTZ DEFAULT NOW(),
+  end_date TIMESTAMPTZ
+);
+
+CREATE TABLE ai_messages (
+  id_message BIGSERIAL PRIMARY KEY,
+  id_conversation BIGINT REFERENCES conversations(id_conversation) ON DELETE CASCADE,
+  sender VARCHAR(20) NOT NULL CHECK (sender IN ('user', 'assistant')),
+  content TEXT,
+  sent_date TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 14. Tokens revocados
+CREATE TABLE revoked_tokens (
+  id_token BIGSERIAL PRIMARY KEY,
+  id_user UUID REFERENCES users(id_user) ON DELETE CASCADE,
+  token_jti VARCHAR(100) NOT NULL UNIQUE,
+  revocation_date TIMESTAMPTZ DEFAULT NOW(),
+  original_expiration_date TIMESTAMPTZ
+);
+
+-- ============================================================
+-- ÍNDICES
+-- ============================================================
+CREATE INDEX idx_sensor_data_chamber ON sensor_data(id_chamber);
+CREATE INDEX idx_sensor_data_sensor ON sensor_data(id_sensor);
+CREATE INDEX idx_sensor_data_timestamp ON sensor_data(timestamp DESC);
+CREATE INDEX idx_predictions_chamber ON predictions(id_chamber);
+CREATE INDEX idx_alerts_chamber ON generated_alerts(id_chamber);
+CREATE INDEX idx_alerts_status ON generated_alerts(status);
+CREATE INDEX idx_haccp_rules_chamber ON haccp_rules(id_chamber);
+CREATE INDEX idx_ingestion_log_chamber ON ingestion_log(id_chamber);
+CREATE INDEX idx_saving_recommendation_chamber ON saving_recommendation(id_chamber);
+CREATE INDEX idx_user_preferences_user ON user_preferences(id_user);
