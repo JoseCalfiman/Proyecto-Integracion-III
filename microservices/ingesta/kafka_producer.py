@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
+KAFKA_BROKER = os.getenv("KAFKA_BOOTSTRAP_SERVERS") or os.getenv("KAFKA_BROKER", "localhost:9092")
 KAFKA_TOPIC = "sensor.raw"
 
 producer = Producer({"bootstrap.servers": KAFKA_BROKER})
@@ -21,7 +21,7 @@ def delivery_report(err, msg):
 
 def publish_sensor_data(data: dict) -> None:
     """Publica una lectura de sensor en el tópico sensor.raw, usando chamber_id como key."""
-    key = str(data["chamber_id"])
+    key = str(data.get("id_chamber") or data.get("chamber_id"))
     value = json.dumps(data)
 
     producer.produce(KAFKA_TOPIC, key=key, value=value, callback=delivery_report)

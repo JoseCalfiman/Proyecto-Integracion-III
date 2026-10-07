@@ -1,15 +1,19 @@
+
+# su funcion principal es crear los modelos de datos que se utilizan en la API y en la base de datos. Estos modelos definen la estructura de los datos, las validaciones y las relaciones entre ellos.  
+
 from datetime import datetime
 from typing import Optional, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+
 
 
 class SensorDataCreate(BaseModel):
-    id_chamber: UUID
+    id_chamber: UUID = Field(validation_alias=AliasChoices("id_chamber", "chamber_id"))
     temperature: float = Field(ge=-50, le=50)
     consumption_kw: float = Field(ge=0, le=999.999)
-    timestamp: datetime
+    timestamp: datetime = Field(validation_alias=AliasChoices("timestamp", "recorded_at"))
 
 
 class DashboardLive(BaseModel):

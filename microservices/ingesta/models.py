@@ -144,3 +144,27 @@ class SavingRecommendation(Base):
     status = Column(String(20), default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     applied_at = Column(DateTime(timezone=True))
+
+
+class EnergyPrice(Base):
+    __tablename__ = "energy_price"
+
+    id_price = Column(Integer, primary_key=True, autoincrement=True)
+    price_kwh = Column(Numeric(10, 4), nullable=False)
+    source = Column(String(100))
+    queried_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Prediction(Base):
+    __tablename__ = "predictions"
+
+    id_prediction = Column(BigInteger, primary_key=True, autoincrement=True)
+    id_chamber = Column(UUID(as_uuid=True), ForeignKey("chambers.id_chamber"))
+    calculated_slope = Column(Numeric(8, 4))
+    projected_temperature = Column(Numeric(5, 2))
+    remaining_time_min = Column(Numeric(8, 2))
+    risk_level = Column(String(20), nullable=False)
+    calculation_date = Column(DateTime(timezone=True), server_default=func.now())
+    id_worker = Column(String(50))
+
+    chamber = relationship("Chamber", lazy="joined")

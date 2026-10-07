@@ -26,15 +26,14 @@ if MQTT_USER and MQTT_PASSWORD:
 
 
 def save_sensor_data(data: dict) -> None:
-    """Valida el payload y lo inserta en la hipertabla sensor_data."""
-    reading = SensorDataCreate(**data)  
+    reading = SensorDataCreate(**data)
 
     db = SessionLocal()
     try:
         db.add(
             SensorData(
-                id_chamber=reading.chamber_id,
-                timestamp=reading.recorded_at,  
+                id_chamber=reading.id_chamber,
+                timestamp=reading.timestamp,
                 temperature=reading.temperature,
                 consumption_kw=reading.consumption_kw,
             )
@@ -45,6 +44,15 @@ def save_sensor_data(data: dict) -> None:
         raise
     finally:
         db.close()
+
+
+def _extraer_chamber_id(data: dict):
+    try:
+        return uuid.UUID(
+            str(data.get("id_chamber") or data.get("chamber_id"))
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def log_ingestion(raw_payload: str, status: str, id_chamber=None, error_message: str = None) -> None:

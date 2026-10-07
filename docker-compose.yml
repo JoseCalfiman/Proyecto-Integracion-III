@@ -118,7 +118,9 @@ services:
       - kafka
       - timescaledb
     networks:
-      - frigorifico-net
+      frigorifico-net:
+        aliases:
+          - ingesta-service
     healthcheck:
       test:
         [
@@ -191,7 +193,7 @@ services:
     env_file:
       - .env
     ports:
-      - "80:80"
+      - "8501:80"
     depends_on:
       - ingesta
       - timescaledb
