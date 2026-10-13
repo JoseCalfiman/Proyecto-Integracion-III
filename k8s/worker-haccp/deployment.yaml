@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-haccp
+  namespace: student-aamonsalve
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-haccp
+  template:
+    metadata:
+      labels:
+        app: worker-haccp
+    spec:
+      containers:
+      - name: worker-haccp
+        image: aamonsalve/cryometric-worker-haccp:latest
+        envFrom:
+        - configMapRef:
+            name: app-config
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "100m"

@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 engine = create_engine(DATABASE_URL, future=True)
 
 
+def initialize_database() -> None:
+    GeneratedAlert.__table__.create(bind=engine, checkfirst=True)
+    AlertAudit.__table__.create(bind=engine, checkfirst=True)
+
+
 def _alert_payload_from_message(payload: dict) -> dict:
     chamber_id = payload.get("id_chamber") or payload.get("chamber_id")
     if chamber_id is None:
@@ -59,7 +64,6 @@ def _persist_audit(session: Session, alert_id: int, action: str, detail: str) ->
         id_user=None,
         action=action,
         detail=detail,
-        action_date=datetime.now(timezone.utc),
     )
     session.add(audit)
 
@@ -104,6 +108,7 @@ def process_alert(payload: dict) -> None:
 
 
 def consume_anomalies() -> None:
+    initialize_database()
     consumer = Consumer(
         {
             "bootstrap.servers": BOOTSTRAP_SERVERS,

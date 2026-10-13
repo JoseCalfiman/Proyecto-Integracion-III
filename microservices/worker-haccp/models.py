@@ -1,7 +1,17 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -35,10 +45,16 @@ class HaccpRule(Base):
     id_user_modified: Mapped[int | None] = mapped_column(ForeignKey("users.id_user"), nullable=True)
 
 
+class Prediction(Base):
+    __tablename__ = "predictions"
+
+    id_prediction: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+
+
 class GeneratedAlert(Base):
     __tablename__ = "generated_alerts"
 
-    id_alert: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id_alert: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
     id_chamber: Mapped[int] = mapped_column(ForeignKey("chambers.id_chamber"), nullable=False)
     id_prediction: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("predictions.id_prediction"), nullable=True)
     id_haccp_rule: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("haccp_rules.id_rule"), nullable=True)
@@ -56,7 +72,7 @@ class GeneratedAlert(Base):
 class AlertAudit(Base):
     __tablename__ = "alert_audit"
 
-    id_audit: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id_audit: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
     id_alert: Mapped[int] = mapped_column(BigInteger, ForeignKey("generated_alerts.id_alert"), nullable=False)
     id_user: Mapped[int | None] = mapped_column(ForeignKey("users.id_user"), nullable=True)
     action: Mapped[str | None] = mapped_column(String(50), nullable=True)

@@ -1,22 +1,22 @@
-from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, BigInteger, String, Numeric, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from datetime import datetime
 
-from db import Base
+Base = declarative_base()
 
-class GeneratedPrediction(Base):
-    __tablename__ = "generated_predictions"
 
-    prediction_id = Column(Integer, primary_key=True, autoincrement=True)
-    chamber_id = Column(UUID(as_uuid=True), ForeignKey("chambers.id_chamber"), nullable=False, index=True)
-    calculated_slope = Column(Float, nullable=True)
-    projected_temperature = Column(Float, nullable=True)
-    remaining_time_min = Column(Float, nullable=True)
+class Prediction(Base):
+    __tablename__ = "predictions"
+
+    id_prediction = Column(BigInteger, primary_key=True, autoincrement=True)
+    id_chamber = Column(String(36), nullable=False)  # ← SIN FK
+    calculated_slope = Column(Numeric(8, 4))
+    projected_temperature = Column(Numeric(5, 2))
+    remaining_time_min = Column(Numeric(8, 2))
     risk_level = Column(String(20), nullable=False)
-    calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    calculation_date = Column(DateTime(timezone=True), default=datetime.utcnow)
+    id_worker = Column(String(50))
 
-    def __repr__(self):
-        return (
-            f"GeneratedPrediction chamber_id={self.chamber_id} "
-            f"risk_level={self.risk_level} "
-            f"remaining_time_min={self.remaining_time_min}"
-        )
+
+# Alias para compatibilidad con haccp_predictions.py
+GeneratedPrediction = Prediction

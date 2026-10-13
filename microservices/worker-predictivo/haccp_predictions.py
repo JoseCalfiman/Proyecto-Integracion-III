@@ -2,7 +2,7 @@ import logging
 from typing import Optional
 from sqlalchemy import MetaData, Table, select
 from db import engine
-from models import GeneratedPrediction
+from models import Prediction  # ← El nombre correcto
 
 _metadata = MetaData()
 _haccp_rules_table: Optional[Table] = None
@@ -51,10 +51,10 @@ def obtener_regla_haccp_activa(session, chamber_id) -> Optional[dict]:
 
 def guardar_prediccion(session, chamber_id, calculated_slope: Optional[float], projected_temperature: Optional[float],
     remaining_time_min: Optional[float],
-    risk_level: str, ) -> GeneratedPrediction:
+    risk_level: str, ) -> Prediction:
     
-    prediccion = GeneratedPrediction(
-        chamber_id=chamber_id,
+    prediccion = Prediction(
+        id_chamber=chamber_id,
         calculated_slope=calculated_slope,
         projected_temperature=projected_temperature,
         remaining_time_min=remaining_time_min,
