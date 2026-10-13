@@ -1,17 +1,23 @@
 // Cliente de cámaras: CRUD sobre /api/v1/camaras (gestión solo Gerente).
 
-import apiClient from './client';
+import apiClient from "./client";
+import { camaraFromApi, camaraToApi } from "./adapters";
+
+// id de la empresa (el backend exige id_company al crear). Mientras no haya login real,
+// usa la empresa del seed; luego saldrá del JWT.
+const COMPANY_ID =
+  import.meta.env.VITE_COMPANY_ID || "11111111-1111-1111-1111-111111111111";
+
+const msg = (error, fallback) => error.response?.data?.detail || fallback;
 
 // listar las camaras
 // permisos: tecnico, gerente
 export const getCamaras = async () => {
   try {
-    const response = await apiClient.get('/camaras');
-    return response.data;
+    const { data } = await apiClient.get("/chambers");
+    return data.map(camaraFromApi);
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al obtener las cámaras'
-    );
+    throw new Error(msg(error, "Error al obtener las cámaras"));
   }
 };
 
@@ -19,38 +25,35 @@ export const getCamaras = async () => {
 // permisos: tecnico, gerente
 export const getCamara = async (id) => {
   try {
-    const response = await apiClient.get(`/camaras/${id}`);
-    return response.data;
+    const { data } = await apiClient.get(`/chambers/${id}`);
+    return camaraFromApi(data);
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al obtener la cámara'
-    );
+    throw new Error(msg(error, "Error al obtener la cámara"));
   }
 };
 
 // crear camara
 // solo gerente
-export const crearCamara = async (data) => {
+export const crearCamara = async (form) => {
   try {
-    const response = await apiClient.post('/camaras', data);
-    return response.data;
+    const { data } = await apiClient.post("/chambers", {
+      id_company: COMPANY_ID,
+      ...camaraToApi(form),
+    });
+    return camaraFromApi(data);
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al crear la cámara'
-    );
+    throw new Error(msg(error, "Error al crear la cámara"));
   }
 };
 
 // actualizar camara
 // solo gerente
-export const actualizarCamara = async (id, data) => {
+export const actualizarCamara = async (id, form) => {
   try {
-    const response = await apiClient.put(`/camaras/${id}`, data);
-    return response.data;
+    const { data } = await apiClient.put(`/chambers/${id}`, camaraToApi(form));
+    return camaraFromApi(data);
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al actualizar la cámara'
-    );
+    throw new Error(msg(error, "Error al actualizar la cámara"));
   }
 };
 
@@ -58,11 +61,8 @@ export const actualizarCamara = async (id, data) => {
 // solo gerente
 export const eliminarCamara = async (id) => {
   try {
-    const response = await apiClient.delete(`/camaras/${id}`);
-    return response.data;
+    await apiClient.delete(`/chambers/${id}`);
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al eliminar la cámara'
-    );
+    throw new Error(msg(error, "Error al eliminar la cámara"));
   }
 };

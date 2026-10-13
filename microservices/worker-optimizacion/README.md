@@ -74,7 +74,8 @@ El esquema del proyecto se define en `database/init.sql`. El worker escribe en:
 - `predicted_consumption`: inserta el consumo diario predicho (`chamber_id`,
   `prediction_date`, `predicted_consumption_kw`).
 - `saving_recommendations`: inserta las recomendaciones (`company_id`,
-  `chamber_id`, `price_id`, `action`, `amount_clp`, `justification`, `status`).
+  `chamber_id`, `price_id`, `action`, `savings_percentage`, `amount_clp`,
+  `justification`, `status`).
 
 La cámara y la empresa se toman de `OPTIMIZATION_CHAMBER_ID` y
 `OPTIMIZATION_COMPANY_ID` (por defecto `1`).

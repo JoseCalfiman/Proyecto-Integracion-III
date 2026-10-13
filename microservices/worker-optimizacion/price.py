@@ -27,7 +27,13 @@ def _price_from_db() -> float | None:
     return get_latest_price()
 
 
-def _price_from_csv(path: Path = CSV_PATH) -> float | None:
+def _price_from_csv(path: Path | None = None) -> float | None:
+    """Ultimo precio (CLP/kWh) del CSV local ``precio_cne.csv`` o ``None``.
+
+    El archivo debe tener el formato ``fecha,precio_clp_kwh``. Si ``path`` es
+    ``None`` se usa ``CSV_PATH`` (configurable con ``PRECIO_CNE_CSV``).
+    """
+    path = Path(path) if path is not None else CSV_PATH
     if not path.exists():
         return None
     try:

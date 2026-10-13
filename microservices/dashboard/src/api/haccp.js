@@ -1,39 +1,32 @@
-// realizar peticiones a la API para obtener los datos de HACCP y almacenarlos en el estado global de la aplicación.
-
+// Cliente HACCP -> backend /api/v1/haccp/rules (routes/haccp.py)
 import apiClient from './client';
+import { reglaFromApi, reglaToApi } from './adapters';
 
-// listar reglas haccp
+const msg = (error, fallback) => error.response?.data?.detail || fallback;
+
 export const getReglasHaccp = async () => {
   try {
-    const response = await apiClient.get('/haccp/reglas');
-    return response.data;
+    const { data } = await apiClient.get('/haccp/rules');
+    return data.map(reglaFromApi);
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al obtener las reglas HACCP'
-    );
+    throw new Error(msg(error, 'Error al obtener las reglas HACCP'));
   }
 };
 
-// obtener reglas haccp de una camara
 export const getReglasPorCamara = async (camaraId) => {
   try {
-    const response = await apiClient.get(`/haccp/rules/${camaraId}`);
-    return response.data;
+    const { data } = await apiClient.get(`/haccp/rules/${camaraId}`);
+    return reglaFromApi(data);
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al obtener las reglas de la cámara'
-    );
+    throw new Error(msg(error, 'Error al obtener las reglas de la cámara'));
   }
 };
 
-// actualizar reglas haccp de una camara
-export const actualizarReglasPorCamara = async (camaraId, data) => {
+export const actualizarReglasPorCamara = async (camaraId, form) => {
   try {
-    const response = await apiClient.put(`/haccp/rules/${camaraId}`, data);
-    return response.data;
+    const { data } = await apiClient.put(`/haccp/rules/${camaraId}`, reglaToApi(form));
+    return reglaFromApi(data);
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al actualizar las reglas de la cámara'
-    );
+    throw new Error(msg(error, 'Error al actualizar las reglas de la cámara'));
   }
 };
