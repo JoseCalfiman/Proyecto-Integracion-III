@@ -130,7 +130,7 @@ const HaccpRulesView = () => {
         <select
           value={camaraSeleccionada?.camara_id || ''}
           onChange={(e) => {
-            const camara = lista.find((c) => String(c.camara_id) === e.target.value);
+            const camara = lista.find((c) => c.camara_id === parseInt(e.target.value));
             if (camara) handleSeleccionarCamara(camara);
           }}
           className="w-full border border-gray-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"

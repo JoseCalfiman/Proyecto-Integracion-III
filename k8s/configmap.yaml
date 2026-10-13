@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: student-aamonsalve
+data:
+  MQTT_BROKER_HOST: "test.mosquitto.org"
+  MQTT_BROKER_PORT: "1883"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
+
+  # Variables que Diego usa (PG*)
+  PGHOST: "timescaledb-service"
+  PGPORT: "5432"
+  PGDATABASE: "frigorifico"
+  PGUSER: "admin"
+  PGPASSWORD: "admin123"
+
+  # Mantener las DB_* por compatibilidad
+  DB_HOST: "timescaledb-service"
+  DB_PORT: "5432"
+  DB_NAME: "frigorifico"
+  DB_USER: "admin"
+  DB_PASSWORD: "admin123"
+  POSTGRES_USER: "admin"
+  POSTGRES_PASSWORD: "admin123"
+  POSTGRES_DB: "frigorifico"
