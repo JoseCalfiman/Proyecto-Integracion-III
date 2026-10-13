@@ -1,21 +1,103 @@
+# worker-optimizacion
+
 Responsable: Ricardo Aravena
 
-Worker en Celery que, cada cierto número de horas, consulta la API de CNE Chile para obtener el costo del kWh, usa Prophet para predecir el gasto eléctrico del día siguiente y calcula cuánto se ahorraría apagando equipos no críticos en horas de alto costo.
+Worker (APScheduler) que consume las lecturas de sensores desde Kafka, predice el
+gasto eléctrico del día siguiente con Prophet y calcula cuánto se ahorraría
+apagando equipos no críticos en horas de alto costo. El resultado se guarda en la
+base de datos y luego se publica en Kafka.
 
+## Flujo
 
+```
+sensor.raw (Kafka)
+      │
+      ▼
+kafka_consumer.py  ──►  buffer.py (buffer thread-safe en memoria)
+                              │
+                              ▼
+                     scheduler.py  (cada 6 horas)
+                              │
+                              ▼
+                     optimizer.py  (Prophet real sobre consumo diario)
+                              │
+                              ▼
+                     price.py  (precio kWh desde energy_price / precio_cne.csv)
+                              │
+                              ▼
+              db.py  (persiste predicted_consumption y saving_recommendation)
+                              │
+                              ▼
+              kafka_producer.py  ──►  optimization.reports (Kafka)
+```
 
-├── worker-optimizacion/           # Worker de Optimización (Ricardo)
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   ├── main.py                    # Lógica principal (consumer Kafka + scheduler)
-│   │   ├── config.py                  # Configuración desde .env
-│   │   ├── models.py                  # Modelos SQLAlchemy
-│   │   ├── optimizer.py               # Lógica de Prophet y scraping CNE
-│   │   ├── scraper.py                 # Web scraping de precios CNE
-│   │   ├── kafka_consumer.py          # Consumidor de Kafka
-│   │   ├── kafka_producer.py          # Productor de Kafka (para reportes)
-│   │   ├── crud.py                    # Operaciones CRUD en base de datos
-│   │   ├── tests/
-│   │   │   ├── test_optimizer.py
-│   │   │   └── test_kafka.py
-│   │   └── __init__.py
+`main.py` levanta todo en un solo proceso: el consumer corre en un hilo y alimenta
+el buffer compartido, mientras el scheduler ejecuta la optimización periódicamente.
+
+## Archivos
+
+| Archivo | Rol |
+|---------|-----|
+| `main.py` | Entrypoint: consumer (hilo) + scheduler en un proceso |
+| `kafka_consumer.py` | Lee `sensor.raw`, normaliza y guarda en el buffer |
+| `buffer.py` | Buffer thread-safe de lecturas y agregación diaria de consumo |
+| `scheduler.py` | Orquesta el pipeline cada 6 horas |
+| `optimizer.py` | Pronóstico de consumo diario con Prophet |
+| `price.py` | Precio del kWh desde `energy_price`, `precio_cne.csv` o respaldo |
+| `ahorro.py` | Cálculo del ahorro potencial |
+| `db.py` | Persistencia en PostgreSQL/TimescaleDB (psycopg2) |
+| `kafka_producer.py` | Construye y publica el reporte en Kafka |
+
+## Variables de entorno
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `KAFKA_BOOTSTRAP_SERVERS` | `kafka:9092` | Brokers de Kafka |
+| `KAFKA_TOPIC` | `sensor.raw` | Tópico de lecturas de sensores |
+| `KAFKA_REPORT_TOPIC` | `optimization.reports` | Tópico de salida |
+| `KAFKA_GROUP_ID` | `worker-optimizacion` | Grupo de consumo |
+| `DB_HOST` / `DB_PORT` | `localhost` / `5432` | Conexión a la base de datos |
+| `DB_NAME` / `DB_USER` / `DB_PASS` | `postgres` / `postgres` / — | Credenciales |
+| `OPTIMIZATION_CHAMBER_ID` | `1` | Cámara asociada a las recomendaciones (FK del esquema) |
+| `OPTIMIZATION_COMPANY_ID` | `1` | Empresa asociada a las recomendaciones (FK del esquema) |
+| `PRECIO_CLP_KWH` | `145.0` | Precio de respaldo si no hay BD ni CSV |
+| `PRECIO_CNE_CSV` | `precio_cne.csv` | Ruta del CSV de precios CNE |
+
+Si la base de datos no está disponible, el worker continúa y solo omite la
+persistencia (registra un warning).
+
+## Base de datos
+
+El esquema del proyecto se define en `database/init.sql`. El worker escribe en:
+
+- `energy_price`: lee el último `price_kwh` (CLP) por `queried_at`.
+- `predicted_consumption`: inserta el consumo diario predicho (`chamber_id`,
+  `prediction_date`, `predicted_consumption_kw`).
+- `saving_recommendations`: inserta las recomendaciones (`company_id`,
+  `chamber_id`, `price_id`, `action`, `savings_percentage`, `amount_clp`,
+  `justification`, `status`).
+
+La cámara y la empresa se toman de `OPTIMIZATION_CHAMBER_ID` y
+`OPTIMIZATION_COMPANY_ID` (por defecto `1`).
+
+## Ejecución
+
+Local:
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+Docker (desde `microservices/worker-optimizacion`):
+
+```bash
+docker build -t worker-optimizacion .
+docker run --env-file ../../.env worker-optimizacion
+```
+
+Tests:
+
+```bash
+python -m pytest
+```
