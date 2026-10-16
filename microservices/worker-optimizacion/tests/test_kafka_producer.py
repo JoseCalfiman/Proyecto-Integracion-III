@@ -9,7 +9,7 @@ from kafka_producer import (
 
 
 def test_build_recommendation_has_expected_fields():
-    report = build_recommendation()
+    report = build_recommendation(price_clp_kwh=145.0)
     assert report["type"] == "optimization_report"
     assert "target_date" in report
     assert "projected_daily_cost" in report
@@ -18,7 +18,7 @@ def test_build_recommendation_has_expected_fields():
 
 
 def test_build_recommendation_records_are_valid():
-    report = build_recommendation()
+    report = build_recommendation(price_clp_kwh=145.0)
     for rec in report["recommendations"]:
         assert set(rec.keys()) >= {"equipment", "action", "window"}
 
@@ -35,7 +35,7 @@ def test_build_recommendation_includes_savings_percentage():
 
 def test_publish_report_serializes_json_and_produces():
     producer = build_producer()
-    report = build_recommendation()
+    report = build_recommendation(price_clp_kwh=145.0)
     returned = publish_report(report, producer=producer, topic="optimization.reports")
 
     assert returned is producer
@@ -43,6 +43,6 @@ def test_publish_report_serializes_json_and_produces():
 
 
 def test_report_is_json_serializable():
-    payload = json.dumps(build_recommendation(), ensure_ascii=False)
+    payload = json.dumps(build_recommendation(price_clp_kwh=145.0), ensure_ascii=False)
     assert isinstance(payload, str)
     assert json.loads(payload)["type"] == "optimization_report"

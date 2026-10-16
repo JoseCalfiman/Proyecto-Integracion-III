@@ -61,29 +61,37 @@ def get_connection() -> Iterator[Any]:
         conn.close()
 
 
-def get_latest_price() -> float | None:
-    """Ultimo precio registrado en ``energy_price`` (CLP/kWh) o ``None``."""
+def get_latest_energy_price() -> dict[str, Any] | None:
+    """Ultimo ``id_price`` y ``price_kwh`` de ``energy_price`` por ``queried_at``."""
+    row = None
     with get_connection() as conn:
         if conn is None:
             return None
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT price_kwh FROM energy_price ORDER BY queried_at DESC LIMIT 1"
+                """
+                SELECT id_price, price_kwh
+                FROM energy_price
+                ORDER BY queried_at DESC
+                LIMIT 1
+                """
             )
             row = cur.fetchone()
-    return float(row[0]) if row else None
+    if not row:
+        return None
+    return {"id_price": int(row[0]), "price_kwh": float(row[1])}
+
+
+def get_latest_price() -> float | None:
+    """Ultimo ``price_kwh`` (CLP) de ``energy_price`` o ``None``."""
+    quote = get_latest_energy_price()
+    return quote["price_kwh"] if quote else None
 
 
 def get_latest_price_id() -> int | None:
-    with get_connection() as conn:
-        if conn is None:
-            return None
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT price_id FROM energy_price ORDER BY queried_at DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-    return int(row[0]) if row else None
+    """Ultimo ``id_price`` de ``energy_price`` o ``None``."""
+    quote = get_latest_energy_price()
+    return quote["id_price"] if quote else None
 
 
 def get_consumption_history(
@@ -207,10 +215,14 @@ def save_report(report: dict[str, Any]) -> bool:
             predicted_kwh=predicted_kwh,
         ) and ok
 
+    price_id = report.get("id_price")
+    if price_id is None:
+        price_id = get_latest_price_id()
+
     ok = save_saving_recommendations(
         target_date=target_date,
         price_clp_kwh=price,
         recommendations=report.get("recommendations", []),
-        price_id=get_latest_price_id(),
+        price_id=price_id,
     ) and ok
     return ok

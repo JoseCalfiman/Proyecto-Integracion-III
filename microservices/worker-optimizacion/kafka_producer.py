@@ -8,9 +8,6 @@ from ahorro import Action, calcular_ahorro_action
 REPORT_TOPIC = os.getenv("KAFKA_REPORT_TOPIC", "optimization.reports")
 BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 
-# Precio del kWh en CLP (precio_clp_kwh) usado para el calculo de ahorro.
-PRECIO_CLP_KWH = 145.0
-
 # Ventana horaria de alto costo por defecto.
 DEFAULT_HIGH_COST_WINDOW = ["18:00", "22:00"]
 
@@ -42,17 +39,23 @@ ACTIONS = [
 
 def build_recommendation(
     forecasted_kwh: float | None = None,
-    price_clp_kwh: float = PRECIO_CLP_KWH,
+    price_clp_kwh: float | None = None,
     target_date: str | None = None,
     high_cost_window: list[str] | None = None,
     forecasted_kwh_lower: float | None = None,
     forecasted_kwh_upper: float | None = None,
+    id_price: int | None = None,
 ) -> dict[str, Any]:
     """Construye el reporte de optimizacion.
 
     Cuando ``forecasted_kwh`` es ``None`` se mantienen los valores de ejemplo
     (compatibilidad con la ejecucion standalone de este modulo).
+
+    ``price_clp_kwh`` debe venir de ``energy_price``. No hay precio fijo.
     """
+    if price_clp_kwh is None:
+        raise ValueError("price_clp_kwh es obligatorio; leelo desde energy_price")
+
     recommendations: list[dict[str, Any]] = []
     total_savings = 0.0
 
@@ -81,7 +84,7 @@ def build_recommendation(
             }
         )
 
-    return {
+    report: dict[str, Any] = {
         "type": "optimization_report",
         "target_date": target_date or "2024-01-08",
         "forecasted_kwh": forecasted_kwh,
@@ -93,6 +96,9 @@ def build_recommendation(
         "estimated_savings": total_savings,
         "recommendations": recommendations,
     }
+    if id_price is not None:
+        report["id_price"] = id_price
+    return report
 
 """Callback de entrega de Confluent Kafka."""
 def on_delivery(err, msg) -> None:
@@ -123,7 +129,18 @@ def publish_report(
 
 """Encola y envía un mensaje de prueba con datos de ejemplo."""
 def main() -> None:
-    producer = publish_report(build_recommendation())
+    from price import get_current_quote
+
+    quote = get_current_quote()
+    if quote is None:
+        print("[kafka_producer] no hay precio en energy_price; no se publica")
+        return
+    producer = publish_report(
+        build_recommendation(
+            price_clp_kwh=float(quote["price_kwh"]),
+            id_price=quote["id_price"] if quote["id_price"] is not None else None,
+        )
+    )
     producer.flush()
     print(f"[kafka_producer] flush completado en {REPORT_TOPIC}")
 

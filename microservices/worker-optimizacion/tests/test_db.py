@@ -67,6 +67,29 @@ def _fake_get_connection(rows):
     return factory
 
 
+def test_get_latest_energy_price_reads_latest_row(monkeypatch):
+    factory = _fake_get_connection([(9, 148.2)])
+    monkeypatch.setattr(db, "get_connection", factory)
+
+    assert db.get_latest_energy_price() == {"id_price": 9, "price_kwh": 148.2}
+    sql, params = factory.conn._cursor.executed[-1]
+    assert "id_price" in sql
+    assert "price_kwh" in sql
+    assert "queried_at" in sql
+    assert "price_id" not in sql
+    assert params is None
+
+
+def test_get_latest_energy_price_empty_or_without_db(monkeypatch):
+    monkeypatch.setattr(db, "get_connection", _fake_get_connection([]))
+    assert db.get_latest_energy_price() is None
+
+    monkeypatch.setattr(db, "get_connection", lambda: FakeContext(None))
+    assert db.get_latest_energy_price() is None
+    assert db.get_latest_price() is None
+    assert db.get_latest_price_id() is None
+
+
 def test_get_consumption_history_returns_daily_rows(monkeypatch):
     rows = [(date(2024, 1, 1), 120.5), (date(2024, 1, 2), 130.0)]
     monkeypatch.setattr(db, "get_connection", _fake_get_connection(rows))

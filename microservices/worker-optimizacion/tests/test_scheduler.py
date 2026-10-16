@@ -37,7 +37,11 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
     monkeypatch.setattr(
         sched, "forecast_daily_consumption", lambda df, horizon: _fake_forecast()
     )
-    monkeypatch.setattr(sched, "get_current_price", lambda: 145.0)
+    monkeypatch.setattr(
+        sched,
+        "get_current_quote",
+        lambda: {"id_price": 7, "price_kwh": 145.0},
+    )
     monkeypatch.setattr(
         sched.db, "save_report", lambda report: calls.append(("save", report)) or True
     )
@@ -50,6 +54,7 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
     assert report["type"] == "optimization_report"
     assert report["target_date"] == "2024-01-08"
     assert report["forecasted_kwh"] == 580.0
+    assert report["id_price"] == 7
     assert report["estimated_savings"] == 2465.0
     assert [name for name, _ in calls] == ["save", "publish"]
     assert calls[0][1] is report and calls[1][1] is report
@@ -60,6 +65,18 @@ def test_run_optimization_skips_without_data(monkeypatch):
     monkeypatch.setattr(
         sched, "forecast_daily_consumption", lambda df, horizon: None
     )
+    monkeypatch.setattr(sched, "publish_report", lambda report: published.append(report))
+
+    assert sched.run_optimization() is None
+    assert published == []
+
+
+def test_run_optimization_skips_without_price(monkeypatch):
+    published = []
+    monkeypatch.setattr(
+        sched, "forecast_daily_consumption", lambda df, horizon: _fake_forecast()
+    )
+    monkeypatch.setattr(sched, "get_current_quote", lambda: None)
     monkeypatch.setattr(sched, "publish_report", lambda report: published.append(report))
 
     assert sched.run_optimization() is None
