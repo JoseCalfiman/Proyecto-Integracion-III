@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import time
 from datetime import datetime, timezone
@@ -31,6 +32,8 @@ TOPIC_ALERTS = "haccp.alerts"
 GROUP_ID = "haccp-worker-group"
 BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 ALLOWED_ALERT_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
+ALLOWED_RISK_LEVELS = frozenset({"SIN_RIESGO", "CRITICO", "ALTO", "MEDIO", "BAJO"})
+MAX_BIGINT = 2**63 - 1
 MAX_DATABASE_ATTEMPTS = 3
 DATABASE_RETRY_DELAY_SECONDS = 1
 
@@ -44,6 +47,90 @@ class InvalidKafkaMessage(ValueError):
 
 class TransientDatabaseError(RuntimeError):
     """A database failure exhausted its bounded retries without committing."""
+
+
+def _validate_anomaly_contract(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise InvalidKafkaMessage("El contenido del mensaje debe ser un objeto JSON")
+
+    if "id_chamber" in payload:
+        chamber_id = payload["id_chamber"]
+    elif "chamber_id" in payload:
+        chamber_id = payload["chamber_id"]
+    else:
+        raise InvalidKafkaMessage("Falta el campo obligatorio id_chamber")
+    try:
+        chamber_uuid = UUID(str(chamber_id))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise InvalidKafkaMessage("El campo id_chamber debe ser un UUID válido") from exc
+
+    if "chamber_id" in payload:
+        try:
+            alias_uuid = UUID(str(payload["chamber_id"]))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise InvalidKafkaMessage(
+                "El campo chamber_id debe ser un UUID válido"
+            ) from exc
+        if alias_uuid != chamber_uuid:
+            raise InvalidKafkaMessage(
+                "Los campos id_chamber y chamber_id identifican cámaras distintas"
+            )
+
+    prediction_id = payload.get("id_prediction")
+    if (
+        type(prediction_id) is not int
+        or prediction_id <= 0
+        or prediction_id > MAX_BIGINT
+    ):
+        raise InvalidKafkaMessage(
+            "El campo id_prediction debe ser un BIGINT positivo"
+        )
+
+    for field in ("temperature", "remaining_time_min"):
+        value = payload.get(field)
+        try:
+            is_finite = (
+                not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(value)
+            )
+        except (OverflowError, TypeError, ValueError):
+            is_finite = False
+        if not is_finite:
+            raise InvalidKafkaMessage(f"El campo {field} debe ser un número finito")
+        if field == "remaining_time_min" and value < 0:
+            raise InvalidKafkaMessage(
+                "El campo remaining_time_min no puede ser negativo"
+            )
+
+    severity = payload.get("severity")
+    if not isinstance(severity, str) or severity not in ALLOWED_ALERT_SEVERITIES:
+        raise InvalidKafkaMessage(
+            "El campo severity debe ser uno de: "
+            + ", ".join(sorted(ALLOWED_ALERT_SEVERITIES))
+        )
+
+    risk_level = payload.get("risk_level")
+    if not isinstance(risk_level, str) or risk_level not in ALLOWED_RISK_LEVELS:
+        raise InvalidKafkaMessage(
+            "El campo risk_level no coincide con las categorías del predictor"
+        )
+
+    recorded_at = payload.get("recorded_at")
+    if not isinstance(recorded_at, str) or "T" not in recorded_at.upper():
+        raise InvalidKafkaMessage(
+            "El campo recorded_at debe ser una fecha y hora ISO 8601"
+        )
+    try:
+        datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise InvalidKafkaMessage(
+            "El campo recorded_at debe ser una fecha y hora ISO 8601 válida"
+        ) from exc
+
+    normalized = payload.copy()
+    normalized["id_chamber"] = chamber_uuid
+    return normalized
 
 
 @lru_cache(maxsize=1)
@@ -102,16 +189,9 @@ def _persist_audit(session: Session, alert_id: int, action: str, detail: str) ->
 
 
 def process_alert(payload: dict) -> None:
+    payload = _validate_anomaly_contract(payload)
+    chamber_id = payload["id_chamber"]
     with Session(get_engine()) as session:
-        chamber_id = payload.get("id_chamber") or payload.get("chamber_id")
-        if chamber_id is None:
-            logger.warning("Se ignoró un evento sin id_chamber: %s", payload)
-            raise InvalidKafkaMessage("El mensaje no tiene id_chamber")
-
-        try:
-            chamber_id = UUID(str(chamber_id))
-        except (TypeError, ValueError, AttributeError) as exc:
-            raise InvalidKafkaMessage(f"id_chamber inválido: {chamber_id!r}") from exc
         rule = get_active_rule(session, chamber_id)
         if rule is None:
             logger.warning("No existe regla HACCP activa para la cámara %s", chamber_id)
@@ -119,7 +199,12 @@ def process_alert(payload: dict) -> None:
 
         validation = validar_haccp(payload, rule)
         if not validation["is_alert"]:
-            logger.info("Evento no validado para cámara %s: %s", chamber_id, validation["message"])
+            logger.info(
+                "Evento sensor.anomaly válido, pero sin decisión HACCP para "
+                "la cámara %s: %s",
+                chamber_id,
+                validation["message"],
+            )
             return
 
         if rule.severity not in ALLOWED_ALERT_SEVERITIES:

@@ -1,3 +1,5 @@
+import json
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -21,6 +23,23 @@ from kafka_consumer import (
     _persist_generated_alert,
 )
 from models import AlertAudit, Base, Chamber, GeneratedAlert, HaccpRule, Prediction, User
+
+
+CHAMBER_ID = "44444444-4444-4444-4444-444444444444"
+
+
+def valid_anomaly_payload(**overrides):
+    payload = {
+        "id_chamber": CHAMBER_ID,
+        "id_prediction": 17,
+        "temperature": 5.0,
+        "remaining_time_min": 10.0,
+        "severity": "critical",
+        "risk_level": "MEDIO",
+        "recorded_at": "2025-01-02T03:04:05+00:00",
+    }
+    payload.update(overrides)
+    return payload
 
 
 def test_shared_table_identifiers_match_postgresql_types():
@@ -176,11 +195,11 @@ def test_process_alert_persists_rule_configured_severity(monkeypatch):
     )
 
     kafka_consumer.process_alert(
-        {
-            "id_chamber": str(chamber_id),
-            "temperature_c": 5,
-            "duration_seconds": 900,
-        }
+        valid_anomaly_payload(
+            id_chamber=str(chamber_id),
+            temperature_c=5,
+            duration_seconds=900,
+        )
     )
 
     with Session(engine) as session:
@@ -221,10 +240,12 @@ def test_process_alert_rejects_null_rule_severity_as_invalid(monkeypatch):
     kafka_consumer._handle_kafka_message(
         consumer,
         FakeKafkaMessage(
-            (
-                '{"id_chamber": "%s", "temperature_c": 5, '
-                '"duration_seconds": 900}'
-                % chamber_id
+            json.dumps(
+                valid_anomaly_payload(
+                    id_chamber=str(chamber_id),
+                    temperature_c=5,
+                    duration_seconds=900,
+                )
             ).encode("utf-8"),
             20,
         ),
@@ -311,3 +332,183 @@ def test_transient_database_failure_does_not_confirm_offset(monkeypatch):
 
     assert len(attempts) == 2
     assert consumer.committed_offsets == []
+
+
+def test_valid_anomaly_contract_is_accepted_and_committed(monkeypatch):
+    consumer = FakeKafkaConsumer()
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: create_engine("sqlite://"))
+    monkeypatch.setattr(kafka_consumer, "get_active_rule", lambda session, chamber_id: None)
+
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(json.dumps(valid_anomaly_payload()).encode("utf-8"), 25),
+    )
+
+    assert consumer.committed_offsets == [25]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        valid_anomaly_payload(),
+        valid_anomaly_payload(
+            id_chamber=None,
+            chamber_id=CHAMBER_ID,
+        ),
+    ],
+)
+def test_contract_normalizes_canonical_or_alias_chamber_id(payload):
+    if payload["id_chamber"] is None:
+        payload.pop("id_chamber")
+
+    normalized = kafka_consumer._validate_anomaly_contract(payload)
+
+    assert normalized["id_chamber"] == UUID(CHAMBER_ID)
+
+
+def test_contract_accepts_matching_chamber_aliases():
+    payload = valid_anomaly_payload(chamber_id=CHAMBER_ID)
+
+    normalized = kafka_consumer._validate_anomaly_contract(payload)
+
+    assert normalized["id_chamber"] == UUID(CHAMBER_ID)
+
+
+@pytest.mark.parametrize(
+    ("canonical_id", "alias_id", "expected_reason"),
+    [
+        ("not-a-uuid", CHAMBER_ID, "id_chamber"),
+        (CHAMBER_ID, "not-a-uuid", "chamber_id"),
+        (
+            CHAMBER_ID,
+            "55555555-5555-5555-5555-555555555555",
+            "cámaras distintas",
+        ),
+    ],
+)
+def test_conflicting_or_invalid_chamber_alias_is_rejected_and_logged(
+    canonical_id, alias_id, expected_reason, caplog
+):
+    payload = valid_anomaly_payload(
+        id_chamber=canonical_id,
+        chamber_id=alias_id,
+    )
+    consumer = FakeKafkaConsumer()
+
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(json.dumps(payload).encode("utf-8"), 29),
+    )
+
+    assert consumer.committed_offsets == [29]
+    assert expected_reason in caplog.text
+    assert "se descarta y confirma" in caplog.text
+
+
+def test_contract_rejects_when_both_chamber_identifiers_are_missing():
+    payload = valid_anomaly_payload()
+
+    payload.pop("id_chamber")
+    payload.pop("chamber_id", None)
+
+    with pytest.raises(InvalidKafkaMessage, match="id_chamber"):
+        kafka_consumer._validate_anomaly_contract(payload)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "id_chamber",
+        "id_prediction",
+        "temperature",
+        "remaining_time_min",
+        "severity",
+        "risk_level",
+        "recorded_at",
+    ],
+)
+def test_missing_required_contract_field_is_logged_and_committed(field, caplog):
+    payload = valid_anomaly_payload()
+    payload.pop(field)
+    if field == "id_chamber":
+        payload.pop("chamber_id", None)
+
+    consumer = FakeKafkaConsumer()
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(json.dumps(payload).encode("utf-8"), 26),
+    )
+
+    assert consumer.committed_offsets == [26]
+    assert field in caplog.text
+    assert "se descarta y confirma" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("id_chamber", None),
+        ("id_prediction", None),
+        ("temperature", None),
+        ("remaining_time_min", None),
+        ("severity", None),
+        ("risk_level", None),
+        ("recorded_at", None),
+        ("id_chamber", "not-a-uuid"),
+        ("id_prediction", "17"),
+        ("id_prediction", 0),
+        ("id_prediction", 2**63),
+        ("temperature", "5.0"),
+        ("temperature", True),
+        ("temperature", float("nan")),
+        ("temperature", float("inf")),
+        ("remaining_time_min", -0.1),
+        ("remaining_time_min", float("nan")),
+        ("severity", ""),
+        ("severity", "urgent"),
+        ("risk_level", "LOW"),
+        ("recorded_at", "not-a-date"),
+        ("recorded_at", "2025-01-02"),
+    ],
+)
+def test_invalid_contract_value_is_logged_and_committed(field, value, caplog):
+    payload = valid_anomaly_payload()
+    payload[field] = value
+    consumer = FakeKafkaConsumer()
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(json.dumps(payload).encode("utf-8"), 27),
+    )
+
+    assert consumer.committed_offsets == [27]
+    assert field in caplog.text
+    assert "se descarta y confirma" in caplog.text
+
+
+def test_valid_contract_without_duration_is_not_misclassified_as_invalid(
+    monkeypatch, caplog
+):
+    caplog.set_level("INFO")
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    monkeypatch.setattr(
+        kafka_consumer,
+        "get_active_rule",
+        lambda session, chamber_id: SimpleNamespace(
+            max_absolute_temp=4,
+            min_absolute_temp=-30,
+            tolerance_time_min=15,
+        ),
+    )
+    consumer = FakeKafkaConsumer()
+
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(json.dumps(valid_anomaly_payload()).encode("utf-8"), 28),
+    )
+
+    assert consumer.committed_offsets == [28]
+    assert "Evento sensor.anomaly válido, pero sin decisión HACCP" in caplog.text
+    with Session(engine) as session:
+        assert session.scalar(select(GeneratedAlert)) is None

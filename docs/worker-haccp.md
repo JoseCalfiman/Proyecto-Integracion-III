@@ -58,7 +58,60 @@ Los 15 minutos de tolerancia de la regla persistida son la fuente de la duració
 
 ## Estado de integración
 
-El consumidor obtiene la regla activa y llama a `validar_haccp(payload, rule)`. El evento debe incluir `temperature_c` y `duration_seconds`; si falta cualquiera, se ignora y no se genera alerta. Con una violación válida, el consumidor persiste y publica la severidad y el mensaje calculados por el validador, no la severidad original del evento predictivo. El productor de `sensor.anomaly` no está incluido en este repositorio, por lo que debe enviar ambos campos para cumplir este contrato.
+El consumidor valida el contrato de `sensor.anomaly` antes de obtener la regla
+activa. Un evento válido no necesariamente produce una alerta HACCP: el
+validador determinista actual requiere `temperature_c` y `duration_seconds`,
+campos que no forman parte del contrato predictivo. `remaining_time_min` es una
+estimación hasta superar el límite y no equivale a duración de exposición; el
+Worker no lo convierte. La decisión HACCP determinista se resolverá en otra
+tarea.
+
+## Contrato de `sensor.anomaly`
+
+El evento contiene estos siete campos obligatorios:
+
+| Campo | Tipo y restricción |
+|---|---|
+| `id_chamber` | UUID serializado como string |
+| `id_prediction` | Entero BIGINT positivo de `predictions.id_prediction` |
+| `temperature` | Número finito |
+| `remaining_time_min` | Número finito no negativo |
+| `severity` | `low`, `medium`, `high` o `critical` |
+| `risk_level` | `SIN_RIESGO`, `CRITICO`, `ALTO`, `MEDIO` o `BAJO` |
+| `recorded_at` | Fecha y hora ISO 8601 |
+
+Ejemplo:
+
+```json
+{
+  "id_chamber": "44444444-4444-4444-4444-444444444444",
+  "id_prediction": 42,
+  "temperature": 5.0,
+  "remaining_time_min": 10.0,
+  "severity": "medium",
+  "risk_level": "MEDIO",
+  "recorded_at": "2025-01-02T03:04:05+00:00"
+}
+```
+
+El productor también conserva `chamber_id` como alias de compatibilidad. El
+consumidor acepta `chamber_id` temporalmente cuando falta `id_chamber`, y
+normaliza el identificador al campo interno `id_chamber`. Si se reciben ambos,
+deben representar el mismo UUID; un `id_chamber` inválido no se sustituye con el
+alias y dos identificadores distintos invalidan el mensaje.
+
+El Worker Predictivo, mantenido por otro integrante, debe publicar
+`id_chamber` e `id_prediction` para cumplir el contrato. Mientras el productor
+no incluya un `id_prediction` BIGINT positivo, sus eventos serán rechazados por
+Alertas. La integración entre ambos microservicios queda pendiente de
+coordinación.
+
+El consumidor registra y descarta los mensajes incompletos o inválidos, y
+confirma esos offsets según la política existente. Un evento válido sin
+`temperature_c` o `duration_seconds` no es inválido: se confirma tras procesarlo,
+pero no se genera una decisión ni una alerta HACCP. En particular,
+`remaining_time_min` no equivale a `duration_seconds`; la decisión HACCP
+determinista corresponde a otra tarea.
 
 ## Referencias del código
 
