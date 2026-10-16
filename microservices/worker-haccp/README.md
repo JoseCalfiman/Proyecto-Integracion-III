@@ -8,15 +8,42 @@ condiciones, publica la alerta final en `haccp.alerts` y la persiste en la
 tabla `generated_alerts` junto con la auditoría correspondiente en
 `alert_audit`.
 
-## Reglas HACCP y MER oficial
+## Conexión a PostgreSQL/TimescaleDB
 
-El módulo usa los nombres oficiales del esquema:
+El Worker requiere PostgreSQL/TimescaleDB y acepta estas variables:
 
-- `max_absolute_temp` y `min_absolute_temp`
-- `id_chamber`, `id_user_modified`, `id_rule`
-- `active` en lugar de `is_active`
+- `DATABASE_URL`, si está definida, tiene prioridad.
+- Si no, se construye la conexión con `DB_HOST`, `DB_PORT`, `DB_NAME`,
+  `DB_USER` y `DB_PASSWORD`.
 
-Estas convenciones se aplican en `haccp_validator.py`, `crud.py` y `models.py`.
+Si no hay una URL o faltan variables `DB_*`, el Worker informa el problema y no
+inicia el consumidor. Las credenciales deben proporcionarse mediante la
+configuración del entorno; no deben escribirse en el código.
+
+## Esquema compartido
+
+El Worker utiliza las tablas existentes `chambers`, `users`, `haccp_rules`,
+`predictions`, `generated_alerts` y `alert_audit`, definidas en
+`database/init.sql`. Los identificadores de cámaras y usuarios son UUID; los
+identificadores de reglas, predicciones, alertas y auditorías son BIGINT.
+El Worker no crea tablas ni ejecuta migraciones: el esquema debe estar
+provisionado antes de iniciarlo.
+
+Las reglas activas se filtran por `active` y, si hay varias para una cámara, se
+selecciona la de `review_date` más reciente, igual que el criterio de consulta
+de reglas de Ingesta. Si dos reglas activas empatan en `review_date`, el orden
+elegido por la base de datos no está definido; un criterio de desempate sigue
+pendiente de decisión de negocio. Para persistir una alerta se utiliza la severidad
+configurada en la regla activa, compatible con los valores admitidos por
+PostgreSQL (`low`, `medium`, `high`, `critical`).
+
+Los mensajes inválidos y los rechazos permanentes de datos o restricciones de
+PostgreSQL se registran, se descartan y se confirma su offset para evitar que
+bloqueen el grupo. Los fallos transitorios de base de datos reciben hasta tres
+intentos con espera incremental; si persisten, el proceso se detiene sin
+confirmar el offset para que el mensaje pueda entregarse de nuevo. Otros errores
+de SQLAlchemy no clasificados como transitorios se propagan sin confirmar el
+offset.
 
 ## Flujo del worker
 
@@ -27,16 +54,7 @@ Estas convenciones se aplican en `haccp_validator.py`, `crud.py` y `models.py`.
    - guarda la alerta en `generated_alerts`
    - publica el evento en `haccp.alerts`
    - registra la acción en `alert_audit`
-
-Al iniciar el consumidor, SQLAlchemy crea `alert_audit` en PostgreSQL si no
-existe. La tabla guarda `id_audit`, `id_alert`, `id_user`, `action`, `detail` y
-`action_date`; las referencias de alerta y usuario apuntan a `generated_alerts` y
-`users`.
-
-También crea `generated_alerts` si no existe. Cada alerta persiste `id_alert`,
-`id_chamber`, `id_prediction`, `id_haccp_rule`, `alert_type`, `severity`, `status`,
-`message`, `generation_date` y los campos de acuse y resolución.
-5. Si la validación falla, se registra como `falso positivo`.
+5. Si la validación falla, no se genera una alerta.
 
 ## Archivos clave
 
@@ -51,7 +69,7 @@ También crea `generated_alerts` si no existe. Cada alerta persiste `id_alert`,
 
 ```bash
 docker build -t worker-haccp .
-docker run --rm worker-haccp
+docker run --rm --env-file .env worker-haccp
 ```
 
 ## Dependencias
@@ -62,7 +80,3 @@ sqlalchemy==2.0.30
 psycopg2-binary==2.9.9
 python-dotenv==1.0.1
 ```
-
-
-
-
