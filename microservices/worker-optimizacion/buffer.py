@@ -27,15 +27,18 @@ def _first(data: dict[str, Any], fields: Iterable[str]) -> Any:
     return None
 
 
-def _parse_timestamp(value: Any) -> datetime:
+def _parse_timestamp(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         ts = value
-    elif isinstance(value, (int, float)):
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
         ts = datetime.fromtimestamp(value, tz=timezone.utc)
     elif isinstance(value, str) and value.strip():
-        ts = pd.to_datetime(value, utc=True).to_pydatetime()
+        parsed = pd.to_datetime(value, utc=True, errors="coerce")
+        if pd.isna(parsed):
+            return None
+        ts = parsed.to_pydatetime()
     else:
-        ts = datetime.now(timezone.utc)
+        return None
 
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
@@ -54,9 +57,14 @@ def _to_float(value: Any) -> float | None:
 def normalize_reading(data: dict[str, Any]) -> dict[str, Any] | None:
     """Normaliza un payload crudo de sensor.raw a un formato interno.
 
-    Devuelve ``None`` cuando no hay timestamp ni consumo/temperatura utiles.
+    Devuelve ``None`` si falta el timestamp o no hay consumo/temperatura utiles.
+    No inventa la fecha: sin timestamp el dato no entra al historial de Prophet.
     """
     if not isinstance(data, dict):
+        return None
+
+    ts = _parse_timestamp(_first(data, _TS_FIELDS))
+    if ts is None:
         return None
 
     consumption = _to_float(_first(data, _CONSUMPTION_FIELDS))
@@ -65,7 +73,7 @@ def normalize_reading(data: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     return {
-        "ts": _parse_timestamp(_first(data, _TS_FIELDS)),
+        "ts": ts,
         "consumption_kwh": consumption,
         "temperature": temperature,
         "sensor_id": _first(data, _SENSOR_FIELDS),

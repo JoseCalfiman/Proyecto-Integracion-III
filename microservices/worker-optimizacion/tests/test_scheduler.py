@@ -1,8 +1,11 @@
+import logging
+
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 import scheduler as sched
+from buffer import ReadingsBuffer, normalize_reading
 
 
 def test_build_scheduler_returns_background_scheduler():
@@ -69,6 +72,31 @@ def test_run_optimization_skips_without_data(monkeypatch):
 
     assert sched.run_optimization() is None
     assert published == []
+
+
+def test_worker_warns_and_does_not_invent_prediction_when_data_is_missing(
+    monkeypatch, caplog
+):
+    buf = ReadingsBuffer()
+    buf.add(normalize_reading({"ts": "2024-01-01T10:00:00Z", "consumption_kwh": 8.0}))
+    assert normalize_reading({"consumption_kwh": 99.0}) is None
+
+    saved = []
+    published = []
+    monkeypatch.setattr(sched.db, "save_report", lambda report: saved.append(report) or True)
+    monkeypatch.setattr(sched, "publish_report", lambda report: published.append(report))
+    monkeypatch.setattr(
+        sched, "get_current_quote", lambda: {"id_price": 1, "price_kwh": 100.0}
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = sched.run_optimization(buffer=buf)
+
+    assert result is None
+    assert saved == []
+    assert published == []
+    assert "datos insuficientes" in caplog.text
+    assert "2024-01-08" not in caplog.text
 
 
 def test_run_optimization_skips_without_price(monkeypatch):

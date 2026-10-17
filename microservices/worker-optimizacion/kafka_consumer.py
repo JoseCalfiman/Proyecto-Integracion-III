@@ -31,7 +31,7 @@ def process_message(raw, buffer: ReadingsBuffer | None = None) -> dict | None:
 
     reading = normalize_reading(data)
     if reading is None:
-        print(f"[kafka_consumer] dato sin consumo/temperatura util: {data}")
+        print(f"[kafka_consumer] dato incompleto (sin timestamp o sin consumo/temperatura): {data}")
         return None
 
     target = buffer if buffer is not None else get_buffer()
