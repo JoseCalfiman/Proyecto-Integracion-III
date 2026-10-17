@@ -108,8 +108,10 @@ def procesar_payload(data: dict, raw_payload: str):
         # Publicar los mismos nombres y valores validados que se guardaron.
         publish_sensor_data(reading.model_dump(mode="json"))
     except Exception as e:
-        print(f"Error publicando en Kafka: {e}")
-        log_ingestion(raw_payload, "error", id_chamber=chamber_id, error_message=str(e))
+        # La lectura ya está guardada: conservar el fallo para poder recuperarla.
+        error_message = f"Lectura guardada; publicación Kafka fallida: {e}"
+        print(error_message, flush=True)
+        log_ingestion(raw_payload, "error", id_chamber=chamber_id, error_message=error_message)
         return
 
     log_ingestion(raw_payload, "success", id_chamber=chamber_id)

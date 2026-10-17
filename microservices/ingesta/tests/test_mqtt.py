@@ -161,7 +161,36 @@ class MqttPayloadTests(unittest.TestCase):
             session.return_value.commit.assert_called_once()
             log.assert_called_once()
             self.assertEqual(log.call_args.args[1], "error")
-            self.assertEqual(log.call_args.kwargs["error_message"], "Cola Kafka llena")
+            self.assertIn("Lectura guardada; publicación Kafka fallida", log.call_args.kwargs["error_message"])
+            self.assertIn("Cola Kafka llena", log.call_args.kwargs["error_message"])
+
+    def test_real_producer_callback_controls_final_ingestion_status(self):
+        from test_kafka_producer import kafka
+
+        for delivery_error in (None, "Broker delivery timeout"):
+            with self.subTest(delivery_error=delivery_error), \
+                 patch.object(mqtt_client, "SessionLocal") as session, \
+                 patch.object(mqtt_client, "log_ingestion") as log, \
+                 patch.object(mqtt_client, "publish_sensor_data", kafka.publish_sensor_data), \
+                 patch.object(kafka, "producer") as producer:
+                message = MagicMock()
+                message.topic.return_value = "sensor.raw"
+                message.partition.return_value = 0
+                message.key.return_value = self.payload["id_chamber"].encode()
+
+                def acknowledge(timeout):
+                    session.return_value.commit.assert_called_once()
+                    log.assert_not_called()  # No success antes de la confirmación.
+                    producer.produce.call_args.kwargs["callback"](delivery_error, message)
+                    return 0
+
+                producer.flush.side_effect = acknowledge
+                mqtt_client.procesar_payload(self.payload, json.dumps(self.payload))
+                log.assert_called_once()
+                self.assertEqual(log.call_args.args[1], "error" if delivery_error else "success")
+                if delivery_error:
+                    self.assertIn(delivery_error, log.call_args.kwargs["error_message"])
+                    self.assertIn("topic=sensor.raw partition=0", log.call_args.kwargs["error_message"])
 
     def test_log_persists_final_status_and_error_even_for_unknown_chamber(self):
         for status, error in (("success", None), ("error", "temperatura inválida")):

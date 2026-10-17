@@ -33,6 +33,29 @@ tras conectarse correctamente. Cada conexión exitosa solicita de nuevo
 Los mensajes publicados durante el corte sin retención o sesión persistente
 no se recuperan mediante esta reconexión.
 
+## Confirmación Kafka
+
+`KAFKA_BOOTSTRAP_SERVERS` identifica el broker (`kafka:9092` dentro de Compose).
+El productor mantiene `key=id_chamber`, solicita `acks=all` y habilita
+idempotencia para los reintentos del productor. Cada publicación espera el
+callback de entrega mediante `flush`: plazo de entrega de 10 segundos y
+espera máxima del flush de 11 segundos.
+
+Ingesta registra `success` solo después de guardar la lectura y confirmar su
+entrega. Un error de encolado, un callback fallido o la ausencia de confirmación
+genera `error` en `ingestion_log`, con el motivo en `error_message`. La lectura
+guardada permanece en `sensor_data` y el log conserva el payload original.
+
+Los logs de entrega incluyen `topic`, `partition`, `key` y, al confirmar,
+`offset`. Si aún no existe una partición asignada, se muestra `unknown` o `-1`.
+El flush de cierre también tiene un plazo y reporta mensajes pendientes.
+
+Esta confirmación no es una transacción atómica entre PostgreSQL y Kafka:
+no hay reenvío persistente automático si el proceso muere entre guardar y
+publicar. Un timeout indica entrega no confirmada; no demuestra que el broker
+no recibió el evento. Un outbox sería necesario para recuperación automática
+tras caídas del proceso y una clave de evento para deduplicar reenvíos.
+
 ## Pruebas
 
 Desde la raíz del repositorio:
