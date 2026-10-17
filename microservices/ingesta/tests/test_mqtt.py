@@ -188,12 +188,15 @@ class MqttPayloadTests(unittest.TestCase):
 class MqttConfigurationTests(unittest.TestCase):
     def test_ingesta_credentials_take_priority_and_legacy_pair_is_supported(self):
         cases = [
+            ({"MQTT_BROKER_USER": "canonical", "MQTT_BROKER_PASSWORD": "test-canonical",
+              "MQTT_INGESTA_USER": "ingesta", "MQTT_INGESTA_PASSWORD": "test-other"},
+             ("canonical", "test-canonical")),
             ({"MQTT_INGESTA_USER": "ingesta", "MQTT_INGESTA_PASSWORD": "test-ingesta",
               "MQTT_USER": "legacy", "MQTT_PASSWORD": "test-legacy"},
              ("ingesta", "test-ingesta")),
             ({"MQTT_USER": "legacy", "MQTT_PASSWORD": "test-legacy"},
              ("legacy", "test-legacy")),
-            ({"MQTT_INGESTA_USER": "ingesta", "MQTT_PASSWORD": "test-legacy"}, None),
+            ({"MQTT_INGESTA_USER": "ingesta", "MQTT_PASSWORD": "test-legacy"}, ("ingesta", "")),
             ({}, None),
         ]
         for credentials, expected in cases:
@@ -204,12 +207,38 @@ class MqttConfigurationTests(unittest.TestCase):
                                           "kafka_producer": MagicMock(), "schemas": schemas}), \
                  patch("dotenv.load_dotenv"), patch("paho.mqtt.client.Client") as client:
                 module = load_module("ingesta_mqtt_config_test", INGESTA / "mqtt_client.py")
-                self.assertEqual(module.MQTT_BROKER, "mosquitto")
-                self.assertEqual(module.MQTT_PORT, 1883)
+                self.assertEqual(module.MQTT_BROKER_HOST, "mosquitto")
+                self.assertEqual(module.MQTT_BROKER_PORT, 1883)
+                client.return_value.reconnect_delay_set.assert_called_once_with(min_delay=1, max_delay=60)
                 if expected:
                     client.return_value.username_pw_set.assert_called_once_with(*expected)
                 else:
                     client.return_value.username_pw_set.assert_not_called()
+
+
+class MqttReconnectTests(unittest.TestCase):
+    def test_each_successful_connection_requests_subscription(self):
+        client = MagicMock()
+        client.subscribe.return_value = (0, 1)
+        mqtt_client.on_connect(client, None, {}, 0)
+        mqtt_client.on_disconnect(client, None, {}, 7)
+        mqtt_client.on_connect(client, None, {}, 0)
+        self.assertEqual(client.subscribe.call_count, 2)
+        client.subscribe.assert_called_with("sensor/raw")
+
+    def test_rejected_connection_does_not_subscribe(self):
+        client = MagicMock()
+        mqtt_client.on_connect(client, None, {}, 5)
+        client.subscribe.assert_not_called()
+
+    def test_start_retries_even_when_broker_is_initially_unavailable(self):
+        with patch.object(mqtt_client, "client") as client, patch.object(mqtt_client, "kafka_flush") as flush:
+            mqtt_client.start()
+            client.connect_async.assert_called_once_with(
+                mqtt_client.MQTT_BROKER_HOST, mqtt_client.MQTT_BROKER_PORT, 60,
+            )
+            client.loop_forever.assert_called_once_with(retry_first_connection=True)
+            flush.assert_called_once()
 
 
 if __name__ == "__main__":

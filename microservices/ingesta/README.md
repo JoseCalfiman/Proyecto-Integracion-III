@@ -1,31 +1,62 @@
-Responsable: Diego Curiqueo
+# Ingesta
 
-Microservicio que recibe los datos de los sensores (temperatura/consumo), los valida y los guarda en TimescaleDB. Al recibir un dato nuevo, publica un evento nuevos_datos en Redis para que el worker predictivo lo procese.
+Responsable: Diego Curiqueo.
 
+Recibe lecturas por MQTT en `sensor/raw`, valida el payload, lo guarda en
+TimescaleDB y publica los campos normalizados en Kafka (`sensor.raw`).
+FastAPI inicia automáticamente el cliente MQTT en un hilo al arrancar.
 
-infra ingesta:
+## Configuración MQTT
 
-ingesta/ # Microservicio de ingesta (Diego) - FastAPI
+Las variables unificadas son:
 
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   ├── app.py                     # Punto de entrada (FastAPI)
-│   │   ├── main.py                    # Lógica principal
-│   │   ├── config.py                  # Configuración desde .env
-│   │   ├── models.py                  # Modelos SQLAlchemy
-│   │   ├── schemas.py                 # Schemas Pydantic (validación)
-│   │   ├── mqtt_client.py             # Cliente MQTT (suscriptor)
-│   │   ├── kafka_producer.py          # Productor de Kafka
-│   │   ├── crud.py                    # Operaciones CRUD en base de datos
-│   │   ├── routes/                    # Endpoints de la API
-│   │   │   ├── auth.py                # Login, logout, refresh token
-│   │   │   ├── alertas.py             # Endpoints de alertas
-│   │   │   ├── camaras.py             # Endpoints de cámaras
-│   │   │   ├── haccp.py               # Endpoints de reglas HACCP
-│   │   │   ├── optimizacion.py        # Endpoints de recomendaciones de ahorro
-│   │   │   ├── historial.py           # Endpoints de historial
-│   │   │   └── usuarios.py            # Endpoints de usuarios
-│   │   ├── tests/
-│   │   │   ├── test_api.py
-│   │   │   └── test_mqtt.py
-│   │   └── __init__.py
+```dotenv
+MQTT_BROKER_HOST=mosquitto
+MQTT_BROKER_PORT=1883
+MQTT_BROKER_USER=ingesta
+MQTT_BROKER_PASSWORD=<contraseña de la cuenta ingesta>
+```
+
+`mosquitto` es el host dentro de Docker Compose. Para ejecutar directamente
+con Python y conectar al puerto publicado en tu equipo, usa `localhost`.
+Las credenciales deben coincidir con el archivo de contraseñas de Mosquitto.
+La cuenta de Ingesta necesita permiso de lectura sobre `sensor/raw`.
+
+Para mantener compatibilidad con el `.env` existente, si no se define
+`MQTT_BROKER_USER`, se usa el par `MQTT_INGESTA_USER`/`MQTT_INGESTA_PASSWORD`;
+si tampoco existe, se usa `MQTT_USER`/`MQTT_PASSWORD`. No se mezclan pares.
+
+El cliente reintenta incluso si el broker está caído al arrancar. La espera
+entre intentos se duplica desde 1 segundo hasta 60 segundos y vuelve a 1
+tras conectarse correctamente. Cada conexión exitosa solicita de nuevo
+`sensor/raw`; el log confirma la suscripción cuando llega el SUBACK.
+Los mensajes publicados durante el corte sin retención o sesión persistente
+no se recuperan mediante esta reconexión.
+
+## Pruebas
+
+Desde la raíz del repositorio:
+
+```bash
+venv/bin/python -B -m unittest discover -s microservices/ingesta/tests -v
+```
+
+Prueba real de reconexión (reinicia el contenedor Mosquitto):
+
+```bash
+docker compose up -d mosquitto
+venv/bin/python -B microservices/ingesta/tests/check_mqtt_reconnect.py
+```
+
+Requiere acceso a Docker y las credenciales `MQTT_ADMIN_USER` y
+`MQTT_ADMIN_PASSWORD` en `.env` para publicar mensajes de prueba. Usa
+`MQTT_HOST_LOCAL` (por defecto `localhost`) para conectar desde tu equipo.
+La prueba usa el cliente y callbacks reales de Ingesta, confirma recepción
+antes y después de reiniciar el broker, y aísla PostgreSQL y Kafka.
+
+Para aplicar los cambios al servicio:
+
+```bash
+docker compose up -d --no-deps --build --force-recreate ingesta
+docker compose logs --since 1m -f ingesta
+```

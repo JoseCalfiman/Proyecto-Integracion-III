@@ -13,21 +13,25 @@ from schemas import SensorDataCreate
 
 load_dotenv()
 
-MQTT_BROKER = os.getenv("MQTT_BROKER_HOST", "test.mosquitto.org")
-MQTT_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
-# Usar la cuenta de lectura de Ingesta; conservar el par anterior como fallback.
-MQTT_USER = os.getenv("MQTT_INGESTA_USER") or os.getenv("MQTT_USER", "")
-MQTT_PASSWORD = (
-    os.getenv("MQTT_INGESTA_PASSWORD", "")
-    if os.getenv("MQTT_INGESTA_USER")
-    else os.getenv("MQTT_PASSWORD", "")
-)
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "mosquitto")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+# Elegir un par completo, sin mezclar credenciales de distintas cuentas.
+if os.getenv("MQTT_BROKER_USER"):
+    MQTT_BROKER_USER = os.getenv("MQTT_BROKER_USER")
+    MQTT_BROKER_PASSWORD = os.getenv("MQTT_BROKER_PASSWORD", "")
+elif os.getenv("MQTT_INGESTA_USER"):
+    MQTT_BROKER_USER = os.getenv("MQTT_INGESTA_USER")
+    MQTT_BROKER_PASSWORD = os.getenv("MQTT_INGESTA_PASSWORD", "")
+else:
+    MQTT_BROKER_USER = os.getenv("MQTT_USER", "")
+    MQTT_BROKER_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_TOPIC = "sensor/raw"
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, reconnect_on_failure=True)
+client.reconnect_delay_set(min_delay=1, max_delay=60)
 
-if MQTT_USER and MQTT_PASSWORD:
-    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+if MQTT_BROKER_USER:
+    client.username_pw_set(MQTT_BROKER_USER, MQTT_BROKER_PASSWORD)
 
 
 def save_sensor_data(data: dict) -> SensorDataCreate:
@@ -112,9 +116,29 @@ def procesar_payload(data: dict, raw_payload: str):
 
 
 def on_connect(client, userdata, flags, reason_code, properties=None):
-    print(f"Conectado al broker MQTT (rc={reason_code})")
-    client.subscribe(MQTT_TOPIC)
-    print(f"Suscrito al topico '{MQTT_TOPIC}'")
+    if reason_code != 0:
+        print(f"Conexión MQTT rechazada (rc={reason_code}); se reintentará", flush=True)
+        return
+    print(f"Conectado al broker MQTT (rc={reason_code})", flush=True)
+    result, _ = client.subscribe(MQTT_TOPIC)
+    if result != mqtt.MQTT_ERR_SUCCESS:
+        print(f"Error solicitando suscripción MQTT: {result}", flush=True)
+
+
+def on_subscribe(client, userdata, mid, reason_codes, properties=None):
+    if any(code.is_failure for code in reason_codes):
+        print(f"Suscripción MQTT rechazada para '{MQTT_TOPIC}'", flush=True)
+    else:
+        print(f"Suscrito al topico '{MQTT_TOPIC}'", flush=True)
+
+
+def on_disconnect(client, userdata, disconnect_flags, reason_code, properties=None):
+    if reason_code != 0:
+        print(f"Conexión MQTT perdida (rc={reason_code}); reconexión automática con backoff de 1 a 60 s", flush=True)
+
+
+def on_connect_fail(client, userdata):
+    print("Broker MQTT no disponible; se reintentará con backoff de 1 a 60 s", flush=True)
 
 
 def on_message(client, userdata, msg):
@@ -133,12 +157,15 @@ def on_message(client, userdata, msg):
 
 client.on_connect = on_connect
 client.on_message = on_message
+client.on_subscribe = on_subscribe
+client.on_disconnect = on_disconnect
+client.on_connect_fail = on_connect_fail
 
 
 def start():
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.connect_async(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
     try:
-        client.loop_forever()
+        client.loop_forever(retry_first_connection=True)
     finally:
         kafka_flush()  
 
