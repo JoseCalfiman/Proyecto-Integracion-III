@@ -15,8 +15,13 @@ load_dotenv()
 
 MQTT_BROKER = os.getenv("MQTT_BROKER_HOST", "test.mosquitto.org")
 MQTT_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
-MQTT_USER = os.getenv("MQTT_USER", "")
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
+# Usar la cuenta de lectura de Ingesta; conservar el par anterior como fallback.
+MQTT_USER = os.getenv("MQTT_INGESTA_USER") or os.getenv("MQTT_USER", "")
+MQTT_PASSWORD = (
+    os.getenv("MQTT_INGESTA_PASSWORD", "")
+    if os.getenv("MQTT_INGESTA_USER")
+    else os.getenv("MQTT_PASSWORD", "")
+)
 MQTT_TOPIC = "sensor/raw"
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
@@ -25,7 +30,7 @@ if MQTT_USER and MQTT_PASSWORD:
     client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
 
 
-def save_sensor_data(data: dict) -> None:
+def save_sensor_data(data: dict) -> SensorDataCreate:
     reading = SensorDataCreate(**data)
 
     db = SessionLocal()
@@ -45,8 +50,13 @@ def save_sensor_data(data: dict) -> None:
     finally:
         db.close()
 
+    return reading
+
 
 def _extraer_chamber_id(data: dict):
+    """Obtiene el UUID usando cualquiera de los nombres aceptados del sensor."""
+    if not isinstance(data, dict):
+        return None
     try:
         return uuid.UUID(
             str(data.get("id_chamber") or data.get("chamber_id"))
@@ -75,21 +85,13 @@ def log_ingestion(raw_payload: str, status: str, id_chamber=None, error_message:
         db.close()
 
 
-def _extraer_chamber_id(data: dict):
-    """Intenta obtener un UUID valido de chamber_id para el log, sin lanzar excepcion."""
-    try:
-        return uuid.UUID(str(data.get("chamber_id")))
-    except (TypeError, ValueError):
-        return None
-
-
 def procesar_payload(data: dict, raw_payload: str):
     chamber_id = _extraer_chamber_id(data)
 
     log_ingestion(raw_payload, "pending", id_chamber=chamber_id)
 
     try:
-        save_sensor_data(data)
+        reading = save_sensor_data(data)
         print("Lectura guardada en la base de datos")
     except Exception as e:
         print(f"Error guardando lectura: {e}")
@@ -97,7 +99,8 @@ def procesar_payload(data: dict, raw_payload: str):
         return  
 
     try:
-        publish_sensor_data(data)
+        # Publicar los mismos nombres y valores validados que se guardaron.
+        publish_sensor_data(reading.model_dump(mode="json"))
     except Exception as e:
         print(f"Error publicando en Kafka: {e}")
         log_ingestion(raw_payload, "error", id_chamber=chamber_id, error_message=str(e))
