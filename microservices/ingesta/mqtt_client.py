@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from database import SessionLocal
 from kafka_producer import flush as kafka_flush
 from kafka_producer import publish_sensor_data
-from models import IngestionLog, SensorData
+from models import Chamber, IngestionLog, SensorData
 from schemas import SensorDataCreate
 
 load_dotenv()
@@ -31,7 +31,7 @@ if MQTT_USER and MQTT_PASSWORD:
 
 
 def save_sensor_data(data: dict) -> SensorDataCreate:
-    reading = SensorDataCreate(**data)
+    reading = SensorDataCreate.model_validate(data)
 
     db = SessionLocal()
     try:
@@ -69,6 +69,10 @@ def log_ingestion(raw_payload: str, status: str, id_chamber=None, error_message:
     """Registra el resultado del procesamiento de un mensaje en ingestion_log."""
     db = SessionLocal()
     try:
+        # El payload original conserva el ID incluso si no existe la cámara.
+        # La FK del log no debe impedir registrar el motivo del rechazo.
+        if id_chamber is not None and db.get(Chamber, id_chamber) is None:
+            id_chamber = None
         db.add(
             IngestionLog(
                 id_chamber=id_chamber,
@@ -87,8 +91,6 @@ def log_ingestion(raw_payload: str, status: str, id_chamber=None, error_message:
 
 def procesar_payload(data: dict, raw_payload: str):
     chamber_id = _extraer_chamber_id(data)
-
-    log_ingestion(raw_payload, "pending", id_chamber=chamber_id)
 
     try:
         reading = save_sensor_data(data)
