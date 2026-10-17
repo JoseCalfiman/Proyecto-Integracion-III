@@ -6,6 +6,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 import scheduler as sched
 from buffer import ReadingsBuffer, normalize_reading
+from health import health
 
 
 def test_build_scheduler_returns_background_scheduler():
@@ -51,6 +52,7 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
     monkeypatch.setattr(
         sched, "publish_report", lambda report: calls.append(("publish", report))
     )
+    health.reset()
 
     report = sched.run_optimization()
 
@@ -61,10 +63,12 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
     assert report["estimated_savings"] == 2465.0
     assert [name for name, _ in calls] == ["save", "publish"]
     assert calls[0][1] is report and calls[1][1] is report
+    assert health.snapshot()["last_optimization_at"] is not None
 
 
 def test_run_optimization_skips_without_data(monkeypatch):
     published = []
+    health.reset()
     monkeypatch.setattr(
         sched, "forecast_daily_consumption", lambda df, horizon: None
     )
@@ -72,6 +76,7 @@ def test_run_optimization_skips_without_data(monkeypatch):
 
     assert sched.run_optimization() is None
     assert published == []
+    assert health.snapshot()["last_optimization_at"] is None
 
 
 def test_worker_warns_and_does_not_invent_prediction_when_data_is_missing(

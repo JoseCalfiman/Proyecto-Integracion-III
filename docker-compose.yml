@@ -174,17 +174,23 @@ services:
     container_name: worker-optimizacion
     env_file:
       - .env
+    ports:
+      - "8080:8080"
     depends_on:
       - kafka
       - timescaledb
     networks:
       - frigorifico-net
     healthcheck:
-      test: ["CMD-SHELL", "grep -q python /proc/1/cmdline || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8080/health'')" || exit 1',
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 20s
 
   # Dashboard (React + Nginx)
   dashboard:

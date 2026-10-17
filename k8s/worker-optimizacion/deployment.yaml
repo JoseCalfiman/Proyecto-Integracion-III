@@ -16,6 +16,25 @@ spec:
       containers:
       - name: worker-optimizacion
         image: aamonsalve/cryometric-worker-optimizacion:latest
+        ports:
+        - name: health
+          containerPort: 8080
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 20
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         envFrom:
         - configMapRef:
             name: app-config

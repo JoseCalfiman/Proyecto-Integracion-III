@@ -61,9 +61,28 @@ el buffer compartido, mientras el scheduler ejecuta la optimización periódicam
 | `OPTIMIZATION_CHAMBER_ID` | `1` | Cámara asociada a las recomendaciones (FK del esquema) |
 | `OPTIMIZATION_COMPANY_ID` | `1` | Empresa asociada a las recomendaciones (FK del esquema) |
 | `PRECIO_CNE_CSV` | `precio_cne.csv` | CSV solo si `energy_price` nunca respondió |
+| `HEALTH_PORT` | `8080` | Puerto de `GET /health` |
 
 Si la base de datos no está disponible, el worker continúa y solo omite la
 persistencia (registra un warning).
+
+## Salud
+
+`GET /health` (puerto `8080`) lo consultan Kubernetes (`worker-optimizacion-service`)
+y el System Controller:
+
+```json
+{
+  "status": "ok",
+  "consumer_alive": true,
+  "scheduler_running": true,
+  "last_optimization_at": "2026-10-17T15:00:00+00:00"
+}
+```
+
+`status` es `ok` solo si el consumer sigue vivo y el scheduler está activo.
+Responde `503` si alguno no lo está. `last_optimization_at` es el último cálculo
+realizado, o `null` si todavía no hubo uno.
 
 ## Base de datos
 

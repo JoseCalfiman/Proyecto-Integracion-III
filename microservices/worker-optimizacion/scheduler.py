@@ -8,6 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 import db
 from buffer import ReadingsBuffer, get_buffer
+from health import health
 from kafka_producer import build_recommendation, publish_report
 from optimizer import forecast_daily_consumption
 from price import get_current_quote
@@ -63,6 +64,7 @@ def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
     # Primero persistir, luego publicar.
     db.save_report(report)
     publish_report(report)
+    health.mark_optimization()
     logger.info("[scheduler] reporte publicado para %s", target_date)
     return report
 
