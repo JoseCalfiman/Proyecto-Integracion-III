@@ -23,7 +23,10 @@ from sqlalchemy.orm import Session
 
 from config import get_database_url
 from crud import get_active_rule
-from haccp_validator import validar_haccp
+from haccp_validator import (
+    HaccpRuleConfigurationError,
+    evaluate_predictive_event,
+)
 from kafka_producer import publish_haccp_alert
 from models import AlertAudit, GeneratedAlert
 
@@ -197,24 +200,28 @@ def process_alert(payload: dict) -> None:
             logger.warning("No existe regla HACCP activa para la cámara %s", chamber_id)
             return
 
-        validation = validar_haccp(payload, rule)
+        rule_severity = rule.severity
+        if (
+            not isinstance(rule_severity, str)
+            or rule_severity not in ALLOWED_ALERT_SEVERITIES
+        ):
+            raise HaccpRuleConfigurationError(
+                f"Severidad de regla HACCP inválida para cámara {chamber_id}: "
+                f"{rule_severity!r}"
+            )
+
+        validation = evaluate_predictive_event(payload, rule)
         if not validation["is_alert"]:
             logger.info(
-                "Evento sensor.anomaly válido, pero sin decisión HACCP para "
+                "Evento sensor.anomaly válido sin infracciones HACCP para "
                 "la cámara %s: %s",
                 chamber_id,
                 validation["message"],
             )
             return
 
-        if rule.severity not in ALLOWED_ALERT_SEVERITIES:
-            raise InvalidKafkaMessage(
-                f"Severidad de regla inválida para cámara {chamber_id}: "
-                f"{rule.severity!r}"
-            )
-
         alert_payload = _alert_payload_from_message(payload)
-        alert_payload["severity"] = rule.severity
+        alert_payload["severity"] = rule_severity
         alert_payload["message"] = validation["message"]
         alert = _persist_generated_alert(session, alert_payload, getattr(rule, "id_rule", None))
         _persist_audit(
@@ -263,6 +270,14 @@ def _handle_kafka_message(consumer: Consumer, message) -> None:
             )
             consumer.commit(message=message, asynchronous=False)
             return
+        except HaccpRuleConfigurationError as exc:
+            logger.error(
+                "Configuración inválida de regla HACCP para la cámara %s; "
+                "el offset queda sin confirmar y el procesamiento se detiene: %s",
+                payload.get("id_chamber") or payload.get("chamber_id"),
+                exc,
+            )
+            raise
         except (IntegrityError, DataError) as exc:
             logger.error(
                 "Datos rechazados por PostgreSQL para la cámara %s; "

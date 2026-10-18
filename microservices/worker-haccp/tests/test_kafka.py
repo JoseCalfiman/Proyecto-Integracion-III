@@ -16,6 +16,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session
 
 import kafka_consumer
+from haccp_validator import HaccpRuleConfigurationError
 from kafka_consumer import (
     InvalidKafkaMessage,
     TransientDatabaseError,
@@ -197,18 +198,22 @@ def test_process_alert_persists_rule_configured_severity(monkeypatch):
     kafka_consumer.process_alert(
         valid_anomaly_payload(
             id_chamber=str(chamber_id),
-            temperature_c=5,
-            duration_seconds=900,
+            temperature=5,
+            remaining_time_min=15,
         )
     )
 
     with Session(engine) as session:
         saved_alert = session.scalar(select(GeneratedAlert))
+        saved_audit = session.scalar(select(AlertAudit))
 
     assert saved_alert is not None
     assert saved_alert.id_haccp_rule == rule_id
     assert saved_alert.severity == "high"
+    assert saved_audit is not None
+    assert saved_audit.id_alert == saved_alert.id_alert
     assert published[0]["severity"] == "high"
+    assert published[0]["id_prediction"] == 17
 
 
 def test_process_alert_rejects_null_rule_severity_as_invalid(monkeypatch):
@@ -237,21 +242,18 @@ def test_process_alert_rejects_null_rule_severity_as_invalid(monkeypatch):
     monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
 
     consumer = FakeKafkaConsumer()
-    kafka_consumer._handle_kafka_message(
-        consumer,
-        FakeKafkaMessage(
-            json.dumps(
-                valid_anomaly_payload(
-                    id_chamber=str(chamber_id),
-                    temperature_c=5,
-                    duration_seconds=900,
-                )
-            ).encode("utf-8"),
-            20,
-        ),
-    )
+    with pytest.raises(HaccpRuleConfigurationError, match="Severidad"):
+        kafka_consumer._handle_kafka_message(
+            consumer,
+            FakeKafkaMessage(
+                json.dumps(
+                    valid_anomaly_payload(id_chamber=str(chamber_id))
+                ).encode("utf-8"),
+                20,
+            ),
+        )
 
-    assert consumer.committed_offsets == [20]
+    assert consumer.committed_offsets == []
     with Session(engine) as session:
         assert session.scalar(select(GeneratedAlert)) is None
 
@@ -485,30 +487,154 @@ def test_invalid_contract_value_is_logged_and_committed(field, value, caplog):
     assert "se descarta y confirma" in caplog.text
 
 
-def test_valid_contract_without_duration_is_not_misclassified_as_invalid(
+def test_valid_contract_uses_predictive_decision_and_commits_after_publish(
+    monkeypatch,
+):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    chamber_id = UUID(CHAMBER_ID)
+    with Session(engine) as session:
+        session.add(Chamber(id_chamber=chamber_id))
+        session.add(
+            HaccpRule(
+                id_chamber=chamber_id,
+                active=True,
+                severity="high",
+                max_absolute_temp=4,
+                min_absolute_temp=-30,
+                tolerance_time_min=15,
+            )
+        )
+        session.commit()
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    published = []
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", published.append)
+    consumer = FakeKafkaConsumer()
+
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(
+            json.dumps(
+                valid_anomaly_payload(temperature=5, remaining_time_min=20)
+            ).encode("utf-8"),
+            28,
+        ),
+    )
+
+    assert consumer.committed_offsets == [28]
+    assert published[0]["severity"] == "high"
+    assert published[0]["id_prediction"] == 17
+    with Session(engine) as session:
+        alert = session.scalar(select(GeneratedAlert))
+        audit = session.scalar(select(AlertAudit))
+    assert alert is not None
+    assert audit is not None
+    assert audit.id_alert == alert.id_alert
+
+
+def test_predictive_event_without_infringement_is_not_persisted_and_commits(
     monkeypatch, caplog
 ):
     caplog.set_level("INFO")
     engine = create_engine("sqlite://")
     Base.metadata.create_all(bind=engine)
+    chamber_id = UUID(CHAMBER_ID)
+    with Session(engine) as session:
+        session.add(Chamber(id_chamber=chamber_id))
+        session.add(
+            HaccpRule(
+                id_chamber=chamber_id,
+                active=True,
+                severity="medium",
+                max_absolute_temp=4,
+                min_absolute_temp=-30,
+                tolerance_time_min=15,
+            )
+        )
+        session.commit()
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    consumer = FakeKafkaConsumer()
+
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(
+            json.dumps(
+                valid_anomaly_payload(temperature=4, remaining_time_min=16)
+            ).encode("utf-8"),
+            30,
+        ),
+    )
+
+    assert consumer.committed_offsets == [30]
+    assert "sin infracciones HACCP" in caplog.text
+    with Session(engine) as session:
+        assert session.scalar(select(GeneratedAlert)) is None
+
+
+@pytest.mark.parametrize(
+    "rule_overrides",
+    [
+        {"min_absolute_temp": None},
+        {"max_absolute_temp": None},
+        {"tolerance_time_min": None},
+        {"min_absolute_temp": float("-inf")},
+        {"max_absolute_temp": float("nan")},
+        {"max_absolute_temp": float("inf")},
+        {"tolerance_time_min": float("nan")},
+        {"tolerance_time_min": -1},
+        {"min_absolute_temp": 6, "max_absolute_temp": 5},
+        {"max_absolute_temp": "5"},
+    ],
+)
+def test_invalid_active_rule_leaves_offset_uncommitted_and_stops_processing(
+    monkeypatch, caplog, rule_overrides
+):
+    caplog.set_level("ERROR")
+    monkeypatch.setattr(
+        kafka_consumer, "get_engine", lambda: create_engine("sqlite://")
+    )
+    rule_values = {
+        "severity": "high",
+        "min_absolute_temp": -20,
+        "max_absolute_temp": 5,
+        "tolerance_time_min": 15,
+    }
+    rule_values.update(rule_overrides)
+    rule = SimpleNamespace(**rule_values)
+    monkeypatch.setattr(
+        kafka_consumer, "get_active_rule", lambda session, chamber_id: rule
+    )
+    consumer = FakeKafkaConsumer()
+
+    with pytest.raises(HaccpRuleConfigurationError):
+        _handle_kafka_message(
+            consumer,
+            FakeKafkaMessage(
+                json.dumps(valid_anomaly_payload()).encode("utf-8"), 31
+            ),
+        )
+
+    assert consumer.committed_offsets == []
+    assert "offset queda sin confirmar" in caplog.text
+
+
+def test_missing_active_rule_does_not_create_alert_and_commits(monkeypatch, caplog):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
     monkeypatch.setattr(
-        kafka_consumer,
-        "get_active_rule",
-        lambda session, chamber_id: SimpleNamespace(
-            max_absolute_temp=4,
-            min_absolute_temp=-30,
-            tolerance_time_min=15,
-        ),
+        kafka_consumer, "get_active_rule", lambda session, chamber_id: None
     )
     consumer = FakeKafkaConsumer()
 
     _handle_kafka_message(
         consumer,
-        FakeKafkaMessage(json.dumps(valid_anomaly_payload()).encode("utf-8"), 28),
+        FakeKafkaMessage(
+            json.dumps(valid_anomaly_payload()).encode("utf-8"), 32
+        ),
     )
 
-    assert consumer.committed_offsets == [28]
-    assert "Evento sensor.anomaly válido, pero sin decisión HACCP" in caplog.text
+    assert consumer.committed_offsets == [32]
+    assert "No existe regla HACCP activa" in caplog.text
     with Session(engine) as session:
         assert session.scalar(select(GeneratedAlert)) is None

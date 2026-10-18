@@ -54,17 +54,36 @@ El worker define una regla predeterminada para `haccp_rules` en `crud.py`. `vali
 | `tolerance_time_min` | 15 min | Tiempo de tolerancia de la regla |
 | `active` | `true` | Indica que la regla está activa |
 
-Los 15 minutos de tolerancia de la regla persistida son la fuente de la duración mínima de alerta. Los umbrales de severidad crítica (6 °C y 30 minutos) no están almacenados en `haccp_rules` y permanecen como parámetros predeterminados del validador.
+La evaluación legacy de lecturas y series convierte `tolerance_time_min` a una duración mínima en segundos. La decisión predictiva descrita abajo usa directamente la tolerancia en minutos y no convierte el tiempo restante en duración de exposición.
 
 ## Estado de integración
 
-El consumidor valida el contrato de `sensor.anomaly` antes de obtener la regla
-activa. Un evento válido no necesariamente produce una alerta HACCP: el
-validador determinista actual requiere `temperature_c` y `duration_seconds`,
-campos que no forman parte del contrato predictivo. `remaining_time_min` es una
-estimación hasta superar el límite y no equivale a duración de exposición; el
-Worker no lo convierte. La decisión HACCP determinista se resolverá en otra
-tarea.
+El consumidor valida el contrato de `sensor.anomaly` y obtiene la regla HACCP
+activa para la cámara. La decisión predictiva genera una alerta si se cumple
+cualquiera de estas condiciones:
+
+- `temperature < min_absolute_temp`
+- `temperature > max_absolute_temp`
+- `remaining_time_min <= tolerance_time_min`
+
+Los límites de temperatura son inclusivos para el estado normal: una lectura
+igual al mínimo o máximo no constituye por sí sola una infracción. El tiempo
+restante igual a la tolerancia sí genera alerta. Si no se cumple ninguna
+condición, no se persiste ni publica una alerta.
+
+`remaining_time_min` es una predicción de tiempo hasta alcanzar el límite, no
+una duración de exposición. Esta decisión no lo transforma en
+`duration_seconds`. Los evaluadores legacy `evaluate_temperature_rule`,
+`evaluate_temperature_series` y `validar_haccp` conservan su semántica para
+lecturas/series y siguen trabajando con temperatura y duración.
+
+La decisión utiliza los límites y tolerancia de la regla activa de la cámara.
+Si no existe regla activa, el evento se registra y no genera alerta. Una regla
+activa con parámetros requeridos nulos, no finitos, incompatibles, rango
+invertido o tolerancia negativa se trata como error de configuración: el offset
+no se confirma y el procesamiento se detiene para evitar un ciclo de reintentos
+sin límite. La severidad persistida y publicada procede de la regla activa y
+debe ser `low`, `medium`, `high` o `critical`, valores admitidos por PostgreSQL.
 
 ## Contrato de `sensor.anomaly`
 
@@ -100,22 +119,20 @@ normaliza el identificador al campo interno `id_chamber`. Si se reciben ambos,
 deben representar el mismo UUID; un `id_chamber` inválido no se sustituye con el
 alias y dos identificadores distintos invalidan el mensaje.
 
-El Worker Predictivo, mantenido por otro integrante, debe publicar
-`id_chamber` e `id_prediction` para cumplir el contrato. Mientras el productor
-no incluya un `id_prediction` BIGINT positivo, sus eventos serán rechazados por
-Alertas. La integración entre ambos microservicios queda pendiente de
-coordinación.
+El Worker Predictivo, mantenido por otro integrante, actualmente publica
+`chamber_id` pero no incluye `id_prediction`. El consumidor requiere un
+`id_prediction` BIGINT positivo, por lo que los eventos de ese productor siguen
+siendo rechazados hasta coordinar e implementar esa compatibilidad en el
+microservicio Predictivo. Esta tarea no modifica ese productor.
 
-El consumidor registra y descarta los mensajes incompletos o inválidos, y
-confirma esos offsets según la política existente. Un evento válido sin
-`temperature_c` o `duration_seconds` no es inválido: se confirma tras procesarlo,
-pero no se genera una decisión ni una alerta HACCP. En particular,
-`remaining_time_min` no equivale a `duration_seconds`; la decisión HACCP
-determinista corresponde a otra tarea.
+El consumidor registra y descarta los mensajes incompletos o inválidos y
+confirma esos offsets según la política existente. Un evento válido se evalúa
+con `temperature` y `remaining_time_min`; los errores de configuración de una
+regla activa quedan sin confirmar para que puedan corregirse y reprocesarse.
 
 ## Referencias del código
 
-- `microservices/worker-haccp/haccp_validator.py`: umbrales predeterminados y algoritmos de evaluación.
+- `microservices/worker-haccp/haccp_validator.py`: decisión predictiva en `evaluate_predictive_event`, umbrales predeterminados y evaluadores legacy.
 - `microservices/worker-haccp/tests/test_haccp.py`: casos probados para el límite, la duración, la sobrescritura de reglas y series temporales.
 - `microservices/worker-haccp/crud.py`: valores predeterminados de las reglas persistidas.
 - `microservices/worker-haccp/models.py`: estructura de `HaccpRule`.
