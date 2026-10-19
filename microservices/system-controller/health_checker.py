@@ -75,6 +75,28 @@ async def check_tcp(host: str, port: int, timeout: float) -> CheckResult:
     return CheckResult(True, True, latency, f"Puerto {port} abierto (check TCP básico)")
 
 
+async def layered_check(
+    host: str,
+    port: int,
+    timeout: float,
+    deep: Callable[[float], Tuple[bool, str]],
+    tcp_timeout: float = 1.0,
+) -> CheckResult:
+    start = time.perf_counter()
+    tcp = await check_tcp(host, port, min(tcp_timeout, timeout))
+    if not tcp.reachable:
+        return tcp
+    remaining = max(0.5, timeout - (time.perf_counter() - start))
+    try:
+        ok, detail = await asyncio.wait_for(asyncio.to_thread(deep, remaining), remaining + 0.5)
+    except asyncio.TimeoutError:
+        return CheckResult(True, False, None, f"Timeout (> {timeout:g} s) en el check")
+    except Exception as exc:
+        logger.warning("El check profundo en el puerto %s falló: %s: %s", port, type(exc).__name__, exc)
+        return CheckResult(True, False, None, f"El check falló ({type(exc).__name__})")
+    return CheckResult(True, ok, _elapsed_ms(start), detail)
+
+
 # ----------------------------------------------------------------- reglas
 def derive_status(
     replicas: Optional[Replicas],

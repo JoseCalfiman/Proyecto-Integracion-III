@@ -108,6 +108,8 @@ services:
   system-controller:
     build: ./microservices/system-controller
     container_name: system-controller
+    env_file:
+      - .env
     ports:
       - "8002:8000"
     environment:
