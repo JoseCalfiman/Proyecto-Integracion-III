@@ -8,25 +8,34 @@ from dotenv import load_dotenv
 from database import SessionLocal
 from kafka_producer import flush as kafka_flush
 from kafka_producer import publish_sensor_data
-from models import IngestionLog, SensorData
+from models import Chamber, IngestionLog, SensorData
 from schemas import SensorDataCreate
 
 load_dotenv()
 
-MQTT_BROKER = os.getenv("MQTT_BROKER_HOST", "test.mosquitto.org")
-MQTT_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
-MQTT_USER = os.getenv("MQTT_USER", "")
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "mosquitto")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+# Elegir un par completo, sin mezclar credenciales de distintas cuentas.
+if os.getenv("MQTT_BROKER_USER"):
+    MQTT_BROKER_USER = os.getenv("MQTT_BROKER_USER")
+    MQTT_BROKER_PASSWORD = os.getenv("MQTT_BROKER_PASSWORD", "")
+elif os.getenv("MQTT_INGESTA_USER"):
+    MQTT_BROKER_USER = os.getenv("MQTT_INGESTA_USER")
+    MQTT_BROKER_PASSWORD = os.getenv("MQTT_INGESTA_PASSWORD", "")
+else:
+    MQTT_BROKER_USER = os.getenv("MQTT_USER", "")
+    MQTT_BROKER_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_TOPIC = "sensor/raw"
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, reconnect_on_failure=True)
+client.reconnect_delay_set(min_delay=1, max_delay=60)
 
-if MQTT_USER and MQTT_PASSWORD:
-    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+if MQTT_BROKER_USER:
+    client.username_pw_set(MQTT_BROKER_USER, MQTT_BROKER_PASSWORD)
 
 
-def save_sensor_data(data: dict) -> None:
-    reading = SensorDataCreate(**data)
+def save_sensor_data(data: dict) -> SensorDataCreate:
+    reading = SensorDataCreate.model_validate(data)
 
     db = SessionLocal()
     try:
@@ -45,8 +54,13 @@ def save_sensor_data(data: dict) -> None:
     finally:
         db.close()
 
+    return reading
+
 
 def _extraer_chamber_id(data: dict):
+    """Obtiene el UUID usando cualquiera de los nombres aceptados del sensor."""
+    if not isinstance(data, dict):
+        return None
     try:
         return uuid.UUID(
             str(data.get("id_chamber") or data.get("chamber_id"))
@@ -59,6 +73,10 @@ def log_ingestion(raw_payload: str, status: str, id_chamber=None, error_message:
     """Registra el resultado del procesamiento de un mensaje en ingestion_log."""
     db = SessionLocal()
     try:
+        # El payload original conserva el ID incluso si no existe la cámara.
+        # La FK del log no debe impedir registrar el motivo del rechazo.
+        if id_chamber is not None and db.get(Chamber, id_chamber) is None:
+            id_chamber = None
         db.add(
             IngestionLog(
                 id_chamber=id_chamber,
@@ -75,21 +93,11 @@ def log_ingestion(raw_payload: str, status: str, id_chamber=None, error_message:
         db.close()
 
 
-def _extraer_chamber_id(data: dict):
-    """Intenta obtener un UUID valido de chamber_id para el log, sin lanzar excepcion."""
-    try:
-        return uuid.UUID(str(data.get("chamber_id")))
-    except (TypeError, ValueError):
-        return None
-
-
 def procesar_payload(data: dict, raw_payload: str):
     chamber_id = _extraer_chamber_id(data)
 
-    log_ingestion(raw_payload, "pending", id_chamber=chamber_id)
-
     try:
-        save_sensor_data(data)
+        reading = save_sensor_data(data)
         print("Lectura guardada en la base de datos")
     except Exception as e:
         print(f"Error guardando lectura: {e}")
@@ -97,19 +105,42 @@ def procesar_payload(data: dict, raw_payload: str):
         return  
 
     try:
-        publish_sensor_data(data)
+        # Publicar los mismos nombres y valores validados que se guardaron.
+        publish_sensor_data(reading.model_dump(mode="json"))
     except Exception as e:
-        print(f"Error publicando en Kafka: {e}")
-        log_ingestion(raw_payload, "error", id_chamber=chamber_id, error_message=str(e))
+        # La lectura ya está guardada: conservar el fallo para poder recuperarla.
+        error_message = f"Lectura guardada; publicación Kafka fallida: {e}"
+        print(error_message, flush=True)
+        log_ingestion(raw_payload, "error", id_chamber=chamber_id, error_message=error_message)
         return
 
     log_ingestion(raw_payload, "success", id_chamber=chamber_id)
 
 
 def on_connect(client, userdata, flags, reason_code, properties=None):
-    print(f"Conectado al broker MQTT (rc={reason_code})")
-    client.subscribe(MQTT_TOPIC)
-    print(f"Suscrito al topico '{MQTT_TOPIC}'")
+    if reason_code != 0:
+        print(f"Conexión MQTT rechazada (rc={reason_code}); se reintentará", flush=True)
+        return
+    print(f"Conectado al broker MQTT (rc={reason_code})", flush=True)
+    result, _ = client.subscribe(MQTT_TOPIC)
+    if result != mqtt.MQTT_ERR_SUCCESS:
+        print(f"Error solicitando suscripción MQTT: {result}", flush=True)
+
+
+def on_subscribe(client, userdata, mid, reason_codes, properties=None):
+    if any(code.is_failure for code in reason_codes):
+        print(f"Suscripción MQTT rechazada para '{MQTT_TOPIC}'", flush=True)
+    else:
+        print(f"Suscrito al topico '{MQTT_TOPIC}'", flush=True)
+
+
+def on_disconnect(client, userdata, disconnect_flags, reason_code, properties=None):
+    if reason_code != 0:
+        print(f"Conexión MQTT perdida (rc={reason_code}); reconexión automática con backoff de 1 a 60 s", flush=True)
+
+
+def on_connect_fail(client, userdata):
+    print("Broker MQTT no disponible; se reintentará con backoff de 1 a 60 s", flush=True)
 
 
 def on_message(client, userdata, msg):
@@ -128,12 +159,15 @@ def on_message(client, userdata, msg):
 
 client.on_connect = on_connect
 client.on_message = on_message
+client.on_subscribe = on_subscribe
+client.on_disconnect = on_disconnect
+client.on_connect_fail = on_connect_fail
 
 
 def start():
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.connect_async(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
     try:
-        client.loop_forever()
+        client.loop_forever(retry_first_connection=True)
     finally:
         kafka_flush()  
 
