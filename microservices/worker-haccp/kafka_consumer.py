@@ -154,7 +154,6 @@ def _alert_payload_from_message(payload: dict) -> dict:
         "id_chamber": chamber_uuid,
         "id_prediction": payload.get("id_prediction"),
         "message": payload.get("message", "Alerta HACCP detectada"),
-        "generation_date": payload.get("generation_date") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
 
@@ -230,15 +229,22 @@ def process_alert(payload: dict) -> None:
             "created",
             f"Alerta HACCP validada para cámara {chamber_id}.",
         )
+        # Snapshot flushed values before commit expires the ORM instance.
+        publication_payload = {
+            "id_alert": alert.id_alert,
+            "id_chamber": str(alert.id_chamber),
+            "id_prediction": alert.id_prediction,
+            "alert_type": alert.alert_type,
+            "severity": alert.severity,
+            "status": alert.status,
+            "message": alert.message,
+            "generation_date": alert.generation_date.astimezone(timezone.utc)
+            .isoformat().replace("+00:00", "Z"),
+        }
         session.commit()
 
-        publish_haccp_alert({
-            "id_chamber": chamber_id,
-            "id_prediction": payload.get("id_prediction"),
-            "severity": alert_payload["severity"],
-            "message": alert_payload["message"],
-            "generation_date": alert_payload["generation_date"],
-        })
+        # Publication errors propagate: the source offset must remain uncommitted.
+        publish_haccp_alert(publication_payload)
         logger.info("Alerta HACCP guardada para cámara %s", chamber_id)
 
 

@@ -638,3 +638,114 @@ def test_missing_active_rule_does_not_create_alert_and_commits(monkeypatch, capl
     assert "No existe regla HACCP activa" in caplog.text
     with Session(engine) as session:
         assert session.scalar(select(GeneratedAlert)) is None
+
+
+@pytest.mark.parametrize("delivery_failure", [False, True])
+def test_persist_delivery_and_offset_order(monkeypatch, delivery_failure):
+    from datetime import datetime, timezone
+    from sqlalchemy import event
+    import kafka_producer
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    with Session(engine) as session:
+        session.add(Chamber(id_chamber=UUID(CHAMBER_ID)))
+        session.add(HaccpRule(
+            id_chamber=UUID(CHAMBER_ID), active=True, severity="high",
+            min_absolute_temp=-30, max_absolute_temp=4, tolerance_time_min=15,
+        ))
+        session.commit()
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    steps = []
+    published = []
+
+    def after_commit(session):
+        steps.append("database_commit")
+
+    event.listen(Session, "after_commit", after_commit)
+
+    class Producer:
+        def __init__(self, config):
+            pass
+
+        def produce(self, topic, value, *, key, callback):
+            assert steps == ["database_commit"]
+            published.append(json.loads(value.decode("utf-8")))
+            assert key == CHAMBER_ID.encode("utf-8")
+            self.callback = callback
+
+        def flush(self, timeout):
+            steps.append("delivery_failure" if delivery_failure else "delivery_success")
+            self.callback("delivery failed" if delivery_failure else None, object())
+            return 0
+
+    class Consumer(FakeKafkaConsumer):
+        def commit(self, message, asynchronous):
+            steps.append("offset_commit")
+            super().commit(message, asynchronous)
+
+    monkeypatch.setattr(kafka_producer, "Producer", Producer)
+    consumer = Consumer()
+    message = FakeKafkaMessage(json.dumps(valid_anomaly_payload(
+        generation_date="2000-01-01T00:00:00Z",
+    )).encode("utf-8"), 33)
+    try:
+        if delivery_failure:
+            with pytest.raises(kafka_producer.HaccpAlertPublicationError):
+                _handle_kafka_message(consumer, message)
+        else:
+            _handle_kafka_message(consumer, message)
+    finally:
+        event.remove(Session, "after_commit", after_commit)
+
+    if delivery_failure:
+        assert steps == ["database_commit", "delivery_failure"]
+        assert consumer.committed_offsets == []
+    else:
+        assert steps == ["database_commit", "delivery_success", "offset_commit"]
+        assert consumer.committed_offsets == [33]
+    with Session(engine) as session:
+        alert = session.scalar(select(GeneratedAlert))
+        audit = session.scalar(select(AlertAudit))
+        assert audit.id_alert == alert.id_alert
+        assert published == [{
+            "id_alert": alert.id_alert,
+            "id_chamber": str(alert.id_chamber),
+            "id_prediction": alert.id_prediction,
+            "alert_type": alert.alert_type,
+            "severity": alert.severity,
+            "status": alert.status,
+            "message": alert.message,
+            "generation_date": alert.generation_date.replace(tzinfo=timezone.utc)
+            .isoformat().replace("+00:00", "Z"),
+        }]
+        assert datetime.fromisoformat(published[0]["generation_date"].replace("Z", "+00:00")).year != 2000
+
+
+@pytest.mark.parametrize("discard", ["invalid", "no_rule", "no_infringement"])
+def test_discarded_events_never_publish(monkeypatch, discard):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    if discard == "no_infringement":
+        with Session(engine) as session:
+            session.add(Chamber(id_chamber=UUID(CHAMBER_ID)))
+            session.add(HaccpRule(
+                id_chamber=UUID(CHAMBER_ID), active=True, severity="high",
+                min_absolute_temp=-30, max_absolute_temp=4, tolerance_time_min=15,
+            ))
+            session.commit()
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+
+    def unexpected_publication(payload):
+        pytest.fail("A discarded event must never be published")
+
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", unexpected_publication)
+    payload = valid_anomaly_payload(temperature=4, remaining_time_min=16)
+    if discard == "invalid":
+        del payload["id_prediction"]
+    consumer = FakeKafkaConsumer()
+    _handle_kafka_message(consumer, FakeKafkaMessage(json.dumps(payload).encode("utf-8"), 34))
+    assert consumer.committed_offsets == [34]
+    with Session(engine) as session:
+        assert session.scalar(select(GeneratedAlert)) is None
+        assert session.scalar(select(AlertAudit)) is None

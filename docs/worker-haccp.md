@@ -137,3 +137,45 @@ regla activa quedan sin confirmar para que puedan corregirse y reprocesarse.
 - `microservices/worker-haccp/crud.py`: valores predeterminados de las reglas persistidas.
 - `microservices/worker-haccp/models.py`: estructura de `HaccpRule`.
 - `microservices/worker-haccp/kafka_consumer.py`: integración del worker con Kafka y la regla activa.
+
+## Publicación de `haccp.alerts` (tarea 52)
+
+Cada alerta persistida se publica con key igual a `id_chamber` (UUID canónico
+codificado en UTF-8). El valor es JSON UTF-8 con estos campos:
+
+| Campo | Tipo / origen |
+|---|---|
+| `id_alert` | Entero generado en `generated_alerts` |
+| `id_chamber` | UUID como string |
+| `id_prediction` | Entero de la predicción |
+| `severity` | Severidad persistida de la regla activa |
+| `status` | Estado persistido, inicialmente `active` |
+| `message` | Mensaje de la decisión HACCP persistida |
+| `generation_date` | Misma fecha persistida, ISO 8601 UTC con sufijo `Z` |
+| `alert_type` | `haccp_violation`, conservado por compatibilidad |
+
+El payload se obtiene de la alerta después de `flush` y antes de que el commit
+expire el objeto ORM. La fecha procede del valor asignado a la alerta, nunca de
+una fecha adicional del evento entrante ni de un reloj independiente al publicar.
+La alerta y su auditoría `created` se confirman juntas en PostgreSQL antes de
+intentar publicar. Los descartes no generan publicaciones.
+
+El productor espera la entrega mediante callback y `flush` con un timeout explícito
+de 10 segundos. Solo retorna con éxito si recibe un callback sin error y no quedan
+mensajes pendientes. Un error inmediato, error de callback, timeout, ausencia de
+confirmación o fallo de `flush` propaga `HaccpAlertPublicationError`. El consumidor
+se detiene sin confirmar el offset de `sensor.anomaly`; no reintenta automáticamente
+la persistencia por un fallo Kafka. El orden exitoso es: commit PostgreSQL,
+confirmación Kafka y commit síncrono del offset.
+
+No existe una transacción atómica entre PostgreSQL y Kafka. Si PostgreSQL confirma
+y Kafka falla, la alerta y auditoría quedan persistidas. Al reiniciar, reprocesar el
+evento puede crear otra alerta con otro ID. También puede repetirse una publicación
+si Kafka entrega y el proceso cae antes del commit del offset. La key no deduplica.
+Esta tarea no incorpora outbox, idempotencia ni cambios de esquema.
+
+Las pruebas unitarias del productor simulan callbacks, mensajes pendientes y errores;
+las de procesamiento verifican contrato, fecha, descartes y orden de confirmación.
+SQLite en memoria sigue siendo únicamente el sustituto de las pruebas existentes.
+La comprobación de entrega y offsets reales requiere una prueba posterior autorizada
+en el entorno Docker aislado con Kafka y PostgreSQL/TimescaleDB.
