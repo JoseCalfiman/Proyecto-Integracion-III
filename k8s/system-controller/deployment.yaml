@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: system-controller
+  namespace: student-aamonsalve
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: system-controller
+  template:
+    metadata:
+      labels:
+        app: system-controller
+    spec:
+      serviceAccountName: system-controller-sa
+      containers:
+        - name: system-controller
+          image: aamonsalve/cryometric-system-controller:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: controller-secrets
+                optional: true
+          env:
+            - name: SYSTEM_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
