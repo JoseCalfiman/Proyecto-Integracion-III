@@ -177,5 +177,77 @@ Esta tarea no incorpora outbox, idempotencia ni cambios de esquema.
 Las pruebas unitarias del productor simulan callbacks, mensajes pendientes y errores;
 las de procesamiento verifican contrato, fecha, descartes y orden de confirmación.
 SQLite en memoria sigue siendo únicamente el sustituto de las pruebas existentes.
-La comprobación de entrega y offsets reales requiere una prueba posterior autorizada
-en el entorno Docker aislado con Kafka y PostgreSQL/TimescaleDB.
+Las comprobaciones adicionales de entrega y offsets reales requieren autorización
+para usar el entorno Docker aislado con Kafka y PostgreSQL/TimescaleDB. La evidencia
+previa informada se registra en la sección de persistencia siguiente.
+
+
+## Persistencia de `generated_alerts` (tarea 51)
+
+El despliegue utiliza PostgreSQL/TimescaleDB. SQLite en memoria se limita a pruebas
+unitarias y no sustituye la base real. `_persist_generated_alert` guarda:
+
+| Campo | Origen y validación |
+|---|---|
+| `id_chamber` | UUID del evento, validado y normalizado |
+| `id_prediction` | Entero positivo hasta `2**63 - 1`, obligatorio en el contrato |
+| `id_haccp_rule` | `id_rule` de la regla activa obtenida para la cámara |
+| `alert_type` | Valor fijo `haccp_violation` |
+| `severity` | Regla aplicada, con valor `low`, `medium`, `high` o `critical` |
+| `status` | Valor inicial `active` |
+| `message` | Mensaje de `evaluate_predictive_event` |
+| `generation_date` | `datetime.now(timezone.utc)` asignado al objeto insertado |
+
+`flush` inserta la alerta y obtiene `id_alert`; `_persist_audit` agrega la auditoría
+`created`. El commit confirma ambos registros juntos. La instantánea para Kafka se
+construye desde el objeto insertado antes de que expire por el commit, conservando
+su fecha como ISO 8601 UTC. Después del commit se publica en Kafka y, solo tras la
+confirmación de entrega, se confirma el offset. Un fallo anterior al commit revierte
+la transacción pendiente al cerrar la sesión y no publica en Kafka.
+
+Las FK PostgreSQL verifican la existencia de `chambers.id_chamber`,
+`predictions.id_prediction` y `haccp_rules.id_rule`. No se consulta previamente la
+existencia de la predicción ni se comprueba que pertenezca a la misma cámara.
+La regla se obtiene filtrando por cámara y estado activo. Las pruebas SQLite no
+habilitan FK ni se presentan como evidencia de integridad referencial real.
+
+### Política de errores vigente
+
+| Resultado o error | Comportamiento y offset |
+|---|---|
+| Contrato inválido, UUID incorrecto o campo obligatorio ausente | Registra y descarta; confirma offset |
+| Sin regla activa o sin infracción | Registra, no persiste ni publica; confirma offset |
+| Regla activa inválida | Registra y propaga; no confirma |
+| `IntegrityError` o `DataError` | Registra y descarta; confirma offset sin publicar |
+| `DisconnectionError`, `InterfaceError`, `OperationalError`, timeout SQLAlchemy | Hasta tres intentos, con esperas de 1 y 2 segundos; agotamiento propaga `TransientDatabaseError` sin confirmar |
+| Otros errores SQLAlchemy | Registra y propaga; no confirma |
+| Error de publicación Kafka | Propaga; no confirma; la transacción PostgreSQL ya está confirmada |
+
+La clasificación no distingue las causas particulares de `IntegrityError`: una FK
+faltante se descarta aunque provenga de una predicción todavía no confirmada por el
+productor. La publicación debe realizarse después de confirmar esa predicción.
+Los reintentos no aseguran ausencia de duplicados si PostgreSQL confirmó pero se
+perdió la respuesta del commit. Se mantienen además los riesgos PostgreSQL–Kafka
+descritos en la tarea 52; no se incorporan outbox ni idempotencia.
+
+### Cobertura y validaciones externas pendientes
+
+Las pruebas negativas inyectan `IntegrityError`, `DataError` y errores SQLAlchemy en
+el flush de la alerta, la inserción de auditoría o el commit. Verifican ausencia de
+confirmación parcial y publicación, logs y la política de offsets. También simulan
+un fallo transitorio antes del commit seguido de recuperación. Estas pruebas
+verifican control transaccional y tratamiento de excepciones, no errores reales de
+FK PostgreSQL ni commits de resultado incierto.
+
+Queda pendiente validar en PostgreSQL aislado el rechazo de una predicción
+inexistente y de referencias eliminadas concurrentemente. No se han ejecutado estos
+casos negativos reales durante este cierre.
+
+### Evidencia real previa informada por el usuario
+
+La validación de la tarea 52 en Docker con Kafka y PostgreSQL/TimescaleDB generó
+ALT-5: `id_alert=5`, `id_prediction=2`, `id_haccp_rule=2`,
+`id_chamber=55555555-5555-5555-5555-555555555555`, `severity=medium`, `status=active`.
+El usuario confirmó su publicación en `haccp.alerts` y visualización en CryoMetric.
+Se registra como antecedente de integración exitosa; no como una nueva ejecución
+real realizada durante esta intervención.

@@ -749,3 +749,159 @@ def test_discarded_events_never_publish(monkeypatch, discard):
     with Session(engine) as session:
         assert session.scalar(select(GeneratedAlert)) is None
         assert session.scalar(select(AlertAudit)) is None
+
+
+@pytest.fixture
+def persistence_failure_engine(monkeypatch):
+    # SQLite verifies transaction control here, not PostgreSQL foreign keys.
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    with Session(engine) as session:
+        session.add(Chamber(id_chamber=UUID(CHAMBER_ID)))
+        session.add(HaccpRule(
+            id_chamber=UUID(CHAMBER_ID), active=True, severity="medium",
+            min_absolute_temp=-30, max_absolute_temp=4, tolerance_time_min=15,
+        ))
+        session.commit()
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    yield engine
+    engine.dispose()
+
+
+@pytest.mark.parametrize("stage", ["alert_flush", "audit_insert", "commit"])
+@pytest.mark.parametrize("error_type", [
+    kafka_consumer.IntegrityError,
+    kafka_consumer.DataError,
+    kafka_consumer.SQLAlchemyError,
+])
+def test_persistence_failure_rolls_back_without_publication(
+    monkeypatch, caplog, persistence_failure_engine, stage, error_type,
+):
+    from sqlalchemy import event
+
+    engine = persistence_failure_engine
+    error = (
+        error_type("simulated persistence rejection", {}, Exception("test failure"))
+        if error_type in (kafka_consumer.IntegrityError, kafka_consumer.DataError)
+        else error_type("simulated persistence failure")
+    )
+    failures = []
+    published = []
+    consumer = FakeKafkaConsumer()
+
+    def fail():
+        failures.append(stage)
+        assert published == []
+        assert consumer.committed_offsets == []
+        raise error
+
+    class FailingSession(Session):
+        def flush(self, *args, **kwargs):
+            if stage == "alert_flush" and any(
+                isinstance(item, GeneratedAlert) for item in self.new
+            ):
+                fail()
+            return super().flush(*args, **kwargs)
+
+        def commit(self):
+            if stage == "commit":
+                # The alert has reached SQL and the audit is pending together.
+                assert self.scalar(select(GeneratedAlert)) is not None
+                assert self.scalar(select(AlertAudit)) is not None
+                fail()
+            return super().commit()
+
+    def fail_audit_insert(mapper, connection, target):
+        # The real alert INSERT has already happened in this transaction.
+        assert connection.execute(select(GeneratedAlert.id_alert)).scalar() is not None
+        fail()
+
+    monkeypatch.setattr(kafka_consumer, "Session", FailingSession)
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", published.append)
+    if stage == "audit_insert":
+        event.listen(AlertAudit, "before_insert", fail_audit_insert)
+    message = FakeKafkaMessage(json.dumps(valid_anomaly_payload()).encode("utf-8"), 35)
+    permanent_rejection = error_type in (
+        kafka_consumer.IntegrityError, kafka_consumer.DataError,
+    )
+    try:
+        if permanent_rejection:
+            _handle_kafka_message(consumer, message)
+        else:
+            with pytest.raises(kafka_consumer.SQLAlchemyError) as caught:
+                _handle_kafka_message(consumer, message)
+            assert caught.value is error
+    finally:
+        if stage == "audit_insert":
+            event.remove(AlertAudit, "before_insert", fail_audit_insert)
+
+    assert failures == [stage]
+    assert published == []
+    if permanent_rejection:
+        assert consumer.committed_offsets == [35]
+        assert "Datos rechazados por PostgreSQL" in caplog.text
+        assert "se descartan y confirma el offset" in caplog.text
+    else:
+        assert consumer.committed_offsets == []
+        assert "offset queda sin confirmar" in caplog.text
+    with Session(engine) as session:
+        assert session.scalar(select(GeneratedAlert)) is None
+        assert session.scalar(select(AlertAudit)) is None
+
+
+@pytest.mark.parametrize("error_type", [
+    kafka_consumer.DisconnectionError,
+    kafka_consumer.InterfaceError,
+    kafka_consumer.OperationalError,
+    kafka_consumer.SQLAlchemyTimeoutError,
+])
+def test_transient_persistence_failure_recovers_before_offset_commit(
+    monkeypatch, caplog, persistence_failure_engine, error_type,
+):
+    engine = persistence_failure_engine
+    error = (
+        error_type("simulated disconnect", {}, Exception("test failure"))
+        if error_type in (kafka_consumer.InterfaceError, kafka_consumer.OperationalError)
+        else error_type("simulated transient failure")
+    )
+    attempts = []
+    published = []
+    delays = []
+    consumer = FakeKafkaConsumer()
+
+    class RecoveringSession(Session):
+        def commit(self):
+            attempts.append("commit")
+            if len(attempts) == 1:
+                # Fail after both INSERTs, before the transaction is committed.
+                self.flush()
+                assert self.scalar(select(GeneratedAlert)) is not None
+                assert self.scalar(select(AlertAudit)) is not None
+                assert consumer.committed_offsets == []
+                assert published == []
+                raise error
+            return super().commit()
+
+    def publish(payload):
+        assert attempts == ["commit", "commit"]
+        assert consumer.committed_offsets == []
+        published.append(payload)
+
+    monkeypatch.setattr(kafka_consumer, "Session", RecoveringSession)
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", publish)
+    monkeypatch.setattr(kafka_consumer.time, "sleep", delays.append)
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(json.dumps(valid_anomaly_payload()).encode("utf-8"), 36),
+    )
+
+    assert attempts == ["commit", "commit"]
+    assert delays == [kafka_consumer.DATABASE_RETRY_DELAY_SECONDS]
+    assert consumer.committed_offsets == [36]
+    assert len(published) == 1
+    assert "Fallo transitorio de base de datos" in caplog.text
+    with Session(engine) as session:
+        alerts = session.scalars(select(GeneratedAlert)).all()
+        audits = session.scalars(select(AlertAudit)).all()
+        assert len(alerts) == len(audits) == 1
+        assert audits[0].id_alert == alerts[0].id_alert == published[0]["id_alert"]
