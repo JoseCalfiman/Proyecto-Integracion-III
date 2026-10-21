@@ -29,8 +29,8 @@ spec:
           httpGet:
             path: /ready
             port: 8000
-          periodSeconds: 10
           timeoutSeconds: 8
+          periodSeconds: 10
           failureThreshold: 3
         livenessProbe:
           httpGet:
@@ -44,8 +44,8 @@ spec:
             name: app-config
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "50m"
+            cpu: "25m"
+            memory: "64Mi"
           limits:
-            memory: "256Mi"
             cpu: "100m"
+            memory: "160Mi"

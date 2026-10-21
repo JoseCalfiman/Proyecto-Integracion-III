@@ -43,8 +43,8 @@ spec:
           value: "-Xmx256M -Xms128M"  # ← Reducir memoria de Kafka
         resources:
           requests:
-            memory: "256Mi"
             cpu: "100m"
+            memory: "192Mi"
           limits:
-            memory: "512Mi"
-            cpu: "200m"
+            cpu: "250m"
+            memory: "384Mi"
