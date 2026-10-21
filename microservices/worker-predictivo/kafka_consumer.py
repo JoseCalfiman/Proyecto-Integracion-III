@@ -1,14 +1,15 @@
 import json
 import logging
 from collections import defaultdict, deque
-from datetime import datetime, timedelta
 from confluent_kafka import Consumer, Producer, KafkaError
 from config import (
     BOOTSTRAP_SERVERS, GROUP_ID, AUTO_OFFSET_RESET,
     TOPIC_RAW, TOPIC_ANOMALY, LIMITE_HACCP_DEFAULT,
     VENTANA_MINUTOS, MAX_MEDICIONES_VENTANA, UMBRAL_ALERTA_MINUTOS, SEVERITY_DEFAULT,
 )
+from contract import ContractError, parse_sensor_reading
 from predictor import evaluar_riesgo
+from window import actualizar_ventana
 from db import get_session
 from haccp_predictions import obtener_regla_haccp_activa, guardar_prediccion
 
@@ -43,20 +44,91 @@ class PredictiveKafkaWorker:
         )
         self.producer.flush()
 
-    def _parse_timestamp(self, raw_timestamp):
-        if isinstance(raw_timestamp, (int, float)):
-            return datetime.fromtimestamp(raw_timestamp)
-        return datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
-
     def _actualizar_buffer(self, id_chamber, timestamp, temperature):
         buffer = self.buffers[id_chamber]
-        buffer.append({"timestamp": timestamp, "temperature": temperature})
+        agregado = actualizar_ventana(buffer, timestamp, temperature, VENTANA_MINUTOS)
+        return buffer, agregado
 
-        limite_inferior = timestamp - timedelta(minutes=VENTANA_MINUTOS)
-        while buffer and buffer[0]["timestamp"] < limite_inferior:
-            buffer.popleft()
+    def _procesar_mensaje(self, msg):
+        try:
+            data = json.loads(msg.value().decode("utf-8"))
+            lectura = parse_sensor_reading(data)
+        except (ValueError, UnicodeDecodeError, ContractError) as e:
+            # json.JSONDecodeError y ContractError son subclases de ValueError
+            logging.warning(f"Mensaje descartado en {msg.topic()} [{msg.partition()}]: {e}")
+            return
 
-        return buffer
+        id_chamber = lectura.id_chamber
+        timestamp = lectura.timestamp
+        temperature = lectura.temperature
+        logging.debug(f"Lectura recibida: {lectura}")
+
+        buffer, agregado = self._actualizar_buffer(id_chamber, timestamp, temperature)
+        if not agregado:
+            logging.debug(f"[{id_chamber}] lectura repetida o desordenada, se ignora")
+            return
+
+        with get_session() as session:
+            regla = obtener_regla_haccp_activa(session, chamber_id=id_chamber)
+
+            if regla is not None:
+                absolute_max_temp = regla["max_absolute_temp"]
+                umbral_alerta = (
+                    regla["tolerance_time_min"]
+                    if regla["tolerance_time_min"] is not None
+                    else UMBRAL_ALERTA_MINUTOS
+                )
+                severity = regla["severity"]
+            else:
+                logging.warning(
+                    f"Sin regla HACCP activa para id_chamber={id_chamber}; "
+                    f"usando valores por defecto de config.py"
+                )
+                absolute_max_temp = LIMITE_HACCP_DEFAULT
+                umbral_alerta = UMBRAL_ALERTA_MINUTOS
+                severity = SEVERITY_DEFAULT
+
+            resultado = evaluar_riesgo(
+                buffer=list(buffer),
+                absolute_max_temp=absolute_max_temp,
+                umbral_alerta_minutos=umbral_alerta,
+            )
+
+            logging.info(
+                f"[{id_chamber}] pendiente={resultado['pendiente_por_minuto']} "
+                f"tiempo_restante_min={resultado['tiempo_restante_min']} "
+                f"nivel_riesgo={resultado['nivel_riesgo']}"
+            )
+            projected_temperature = (
+                absolute_max_temp
+                if resultado["tiempo_restante_min"] is not None
+                else None
+            )
+
+            try:
+                guardar_prediccion(
+                    session,
+                    chamber_id=id_chamber,
+                    calculated_slope=resultado["pendiente_por_minuto"],
+                    projected_temperature=projected_temperature,
+                    remaining_time_min=resultado["tiempo_restante_min"],
+                    risk_level=resultado["nivel_riesgo"],
+                )
+            except Exception:
+                logging.exception(f"No se pudo guardar la predicción para {id_chamber}")
+                session.rollback()
+
+        if resultado["hay_riesgo"]:
+            alert_payload = {
+                "chamber_id": id_chamber,
+                "remaining_time_min": resultado["tiempo_restante_min"],
+                "temperature": temperature,
+                "severity": severity,
+                "risk_level": resultado["nivel_riesgo"],
+                "slope_per_minute": resultado["pendiente_por_minuto"],
+                "recorded_at": timestamp.isoformat(),
+            }
+            self.send_anomaly_alert(alert_payload)
 
     def start_listening(self):
         self.consumer.subscribe([TOPIC_RAW])
@@ -73,78 +145,11 @@ class PredictiveKafkaWorker:
                     logging.error(f"Error de Kafka: {msg.error()}")
                     continue
 
-                data = json.loads(msg.value().decode('utf-8'))
-                logging.info(f"Datos recibidos: {data}")
-
-                id_chamber = data.get("id_chamber")
-                timestamp = self._parse_timestamp(data.get("timestamp"))
-                temperature = data.get("temperature")
-
-                buffer = self._actualizar_buffer(id_chamber, timestamp, temperature)
-
-                with get_session() as session:
-                    regla = obtener_regla_haccp_activa(session, chamber_id=id_chamber)
-
-                    if regla is not None:
-                        absolute_max_temp = regla["max_absolute_temp"]
-                        umbral_alerta = (
-                            regla["tolerance_time_min"]
-                            if regla["tolerance_time_min"] is not None
-                            else UMBRAL_ALERTA_MINUTOS
-                        )
-                        severity = regla["severity"]
-                    else:
-                        logging.warning(
-                            f"Sin regla HACCP activa para id_chamber={id_chamber}; "
-                            f"usando valores por defecto de config.py"
-                        )
-                        absolute_max_temp = LIMITE_HACCP_DEFAULT
-                        umbral_alerta = UMBRAL_ALERTA_MINUTOS
-                        severity = SEVERITY_DEFAULT
-
-                    resultado = evaluar_riesgo(
-                        buffer=list(buffer),
-                        absolute_max_temp=absolute_max_temp,
-                        umbral_alerta_minutos=umbral_alerta,
-                    )
-
-                    logging.info(
-                        f"[{id_chamber}] pendiente={resultado['pendiente_por_minuto']} "
-                        f"tiempo_restante_min={resultado['tiempo_restante_min']} "
-                        f"nivel_riesgo={resultado['nivel_riesgo']}"
-                    )
-                    projected_temperature = (
-                        absolute_max_temp
-                        if resultado["tiempo_restante_min"] is not None
-                        else None
-                    )
-
-                    try:
-                        guardar_prediccion(
-                            session,
-                            chamber_id=id_chamber,
-                            calculated_slope=resultado["pendiente_por_minuto"],
-                            projected_temperature=projected_temperature,
-                            remaining_time_min=resultado["tiempo_restante_min"],
-                            risk_level=resultado["nivel_riesgo"],
-                        )
-                    except Exception:
-                        logging.exception(
-                            f"No se pudo guardar la predicción para {id_chamber}"
-                        )
-                        session.rollback()
-
-                if resultado["hay_riesgo"]:
-                    alert_payload = {
-                        "chamber_id": str(id_chamber),
-                        "remaining_time_min": resultado["tiempo_restante_min"],
-                        "temperature": temperature,
-                        "severity": severity,
-                        "risk_level": resultado["nivel_riesgo"],
-                        "slope_per_minute": resultado["pendiente_por_minuto"],
-                        "recorded_at": timestamp.isoformat(),
-                    }
-                    self.send_anomaly_alert(alert_payload)
+                try:
+                    self._procesar_mensaje(msg)
+                except Exception:
+                    # Un mensaje problemático no debe tumbar el worker.
+                    logging.exception("Error procesando mensaje; se continúa con el siguiente")
 
         except KeyboardInterrupt:
             logging.info("Deteniendo el consumidor...")
