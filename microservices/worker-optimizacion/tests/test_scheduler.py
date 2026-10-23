@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -22,6 +23,32 @@ def test_build_scheduler_schedules_interval_of_6_hours():
     assert job.id == "optimization_job"
     assert isinstance(job.trigger, IntervalTrigger)
     assert job.trigger.interval.total_seconds() == 6 * 3600
+    assert job.max_instances == 1
+    assert job.coalesce is True
+
+
+def test_build_scheduler_runs_immediately_when_enabled(monkeypatch):
+    monkeypatch.setenv("OPTIMIZATION_RUN_ON_START", "true")
+    scheduler = sched.build_scheduler()
+    scheduler.start(paused=True)
+    try:
+        job = scheduler.get_job("optimization_job")
+        assert job is not None
+        assert job.next_run_time <= datetime.now(job.next_run_time.tzinfo)
+    finally:
+        scheduler.shutdown()
+
+
+def test_build_scheduler_waits_for_interval_by_default(monkeypatch):
+    monkeypatch.delenv("OPTIMIZATION_RUN_ON_START", raising=False)
+    scheduler = sched.build_scheduler()
+    scheduler.start(paused=True)
+    try:
+        job = scheduler.get_job("optimization_job")
+        assert job is not None
+        assert job.next_run_time > datetime.now(job.next_run_time.tzinfo)
+    finally:
+        scheduler.shutdown()
 
 
 def _fake_forecast():

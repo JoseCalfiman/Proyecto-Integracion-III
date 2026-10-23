@@ -33,6 +33,9 @@ kafka_consumer.py  ──►  buffer.py (buffer thread-safe en memoria)
 
 `main.py` levanta todo en un solo proceso: el consumer corre en un hilo y alimenta
 el buffer compartido, mientras el scheduler ejecuta la optimización periódicamente.
+El job corre cada 6 horas y admite como máximo una ejecución simultánea. Con
+`OPTIMIZATION_RUN_ON_START=true`, el primer disparo del mismo job es inmediato;
+no se crea un job adicional para el inicio.
 
 ## Archivos
 
@@ -60,6 +63,7 @@ el buffer compartido, mientras el scheduler ejecuta la optimización periódicam
 | `DB_NAME` / `DB_USER` / `DB_PASS` | `postgres` / `postgres` / — | Credenciales |
 | `OPTIMIZATION_CHAMBER_ID` | `1` | Cámara asociada a las recomendaciones (FK del esquema) |
 | `OPTIMIZATION_COMPANY_ID` | `1` | Empresa asociada a las recomendaciones (FK del esquema) |
+| `OPTIMIZATION_RUN_ON_START` | `false` | Con `true`, ejecuta el primer ciclo al iniciar; activado para el Deployment de demo |
 | `PRECIO_CNE_CSV` | `precio_cne.csv` | CSV solo si `energy_price` nunca respondió |
 | `HEALTH_PORT` | `8080` | Puerto de `GET /health` |
 

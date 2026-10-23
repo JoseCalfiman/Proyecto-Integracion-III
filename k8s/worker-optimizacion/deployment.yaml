@@ -16,6 +16,9 @@ spec:
       containers:
       - name: worker-optimizacion
         image: aamonsalve/cryometric-worker-optimizacion:latest
+        env:
+        - name: OPTIMIZATION_RUN_ON_START
+          value: "true"
         ports:
         - name: health
           containerPort: 8080

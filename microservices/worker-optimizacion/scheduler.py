@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
+from datetime import datetime
 
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -71,6 +73,13 @@ def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
 
 def build_scheduler(buffer: ReadingsBuffer | None = None) -> BackgroundScheduler:
     scheduler = BackgroundScheduler()
+    run_on_start = os.getenv("OPTIMIZATION_RUN_ON_START", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    startup_options = {"next_run_time": datetime.now()} if run_on_start else {}
     scheduler.add_job(
         run_optimization,
         "interval",
@@ -78,6 +87,9 @@ def build_scheduler(buffer: ReadingsBuffer | None = None) -> BackgroundScheduler
         kwargs={"buffer": buffer},
         id="optimization_job",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        **startup_options,
     )
     return scheduler
 
