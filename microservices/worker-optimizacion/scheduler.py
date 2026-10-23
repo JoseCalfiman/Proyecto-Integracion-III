@@ -28,12 +28,23 @@ HIGH_COST_WINDOW = ["18:00", "22:00"]
 
 
 def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
-    """Pipeline: buffer -> Prophet -> BD -> Kafka.
+    """Pipeline: historial de 7 días en BD (o buffer) -> Prophet -> BD -> Kafka.
 
     Devuelve el reporte publicado o ``None`` si no hay datos suficientes.
     """
     buf = buffer if buffer is not None else get_buffer()
-    df = buf.to_dataframe()
+    history = db.get_consumption_history(days=7)
+    if history:
+        df = pd.DataFrame(
+            {
+                "ds": [row["date"] for row in history],
+                "y": [row["consumption_kwh"] for row in history],
+            }
+        )
+        logger.info("[scheduler] usando historial real de consumo de los últimos 7 días")
+    else:
+        df = buf.to_dataframe()
+        logger.info("[scheduler] historial de BD vacío; se usa el buffer de lecturas")
 
     forecast = forecast_daily_consumption(df, horizon=FORECAST_HORIZON)
     if forecast is None:

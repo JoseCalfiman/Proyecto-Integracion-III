@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -64,9 +64,20 @@ def _fake_forecast():
 
 def test_run_optimization_persists_then_publishes(monkeypatch):
     calls = []
+    forecast_inputs = []
+    monkeypatch.setattr(
+        sched.db,
+        "get_consumption_history",
+        lambda days: [
+            {"date": date(2024, 1, 6), "consumption_kwh": 120.0},
+            {"date": date(2024, 1, 7), "consumption_kwh": 130.0},
+        ],
+    )
 
     monkeypatch.setattr(
-        sched, "forecast_daily_consumption", lambda df, horizon: _fake_forecast()
+        sched,
+        "forecast_daily_consumption",
+        lambda df, horizon: forecast_inputs.append(df.copy()) or _fake_forecast(),
     )
     monkeypatch.setattr(
         sched,
@@ -88,6 +99,10 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
     assert report["forecasted_kwh"] == 580.0
     assert report["id_price"] == 7
     assert report["estimated_savings"] == 2465.0
+    assert forecast_inputs[0].to_dict("records") == [
+        {"ds": date(2024, 1, 6), "y": 120.0},
+        {"ds": date(2024, 1, 7), "y": 130.0},
+    ]
     assert [name for name, _ in calls] == ["save", "publish"]
     assert calls[0][1] is report and calls[1][1] is report
     assert health.snapshot()["last_optimization_at"] is not None
@@ -96,6 +111,7 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
 def test_run_optimization_skips_without_data(monkeypatch):
     published = []
     health.reset()
+    monkeypatch.setattr(sched.db, "get_consumption_history", lambda days: [])
     monkeypatch.setattr(
         sched, "forecast_daily_consumption", lambda df, horizon: None
     )
@@ -115,6 +131,7 @@ def test_worker_warns_and_does_not_invent_prediction_when_data_is_missing(
 
     saved = []
     published = []
+    monkeypatch.setattr(sched.db, "get_consumption_history", lambda days: [])
     monkeypatch.setattr(sched.db, "save_report", lambda report: saved.append(report) or True)
     monkeypatch.setattr(sched, "publish_report", lambda report: published.append(report))
     monkeypatch.setattr(
@@ -133,6 +150,7 @@ def test_worker_warns_and_does_not_invent_prediction_when_data_is_missing(
 
 def test_run_optimization_skips_without_price(monkeypatch):
     published = []
+    monkeypatch.setattr(sched.db, "get_consumption_history", lambda days: [])
     monkeypatch.setattr(
         sched, "forecast_daily_consumption", lambda df, horizon: _fake_forecast()
     )

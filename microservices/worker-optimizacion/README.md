@@ -32,7 +32,10 @@ kafka_consumer.py  ──►  buffer.py (buffer thread-safe en memoria)
 ```
 
 `main.py` levanta todo en un solo proceso: el consumer corre en un hilo y alimenta
-el buffer compartido, mientras el scheduler ejecuta la optimización periódicamente.
+el buffer compartido. En cada ciclo, el scheduler toma el consumo diario real de
+los últimos 7 días desde `sensor_data`, convierte cada lectura de kW a kWh usando
+el intervalo de 10 segundos y usa el buffer si la consulta no devuelve historial.
+Después ejecuta la optimización periódicamente.
 El job corre cada 6 horas y admite como máximo una ejecución simultánea. Con
 `OPTIMIZATION_RUN_ON_START=true`, el primer disparo del mismo job es inmediato;
 no se crea un job adicional para el inicio.
@@ -61,8 +64,8 @@ no se crea un job adicional para el inicio.
 | `KAFKA_GROUP_ID` | `worker-optimizacion` | Grupo de consumo |
 | `DB_HOST` / `DB_PORT` | `localhost` / `5432` | Conexión a la base de datos |
 | `DB_NAME` / `DB_USER` / `DB_PASS` | `postgres` / `postgres` / — | Credenciales |
-| `OPTIMIZATION_CHAMBER_ID` | `1` | Cámara asociada a las recomendaciones (FK del esquema) |
-| `OPTIMIZATION_COMPANY_ID` | `1` | Empresa asociada a las recomendaciones (FK del esquema) |
+| `OPTIMIZATION_CHAMBER_ID` | `44444444-4444-4444-4444-444444444444` | Cámara asociada a las recomendaciones (FK del esquema) |
+| `OPTIMIZATION_COMPANY_ID` | `11111111-1111-1111-1111-111111111111` | Empresa asociada a las recomendaciones (FK del esquema) |
 | `OPTIMIZATION_RUN_ON_START` | `false` | Con `true`, ejecuta el primer ciclo al iniciar; activado para el Deployment de demo |
 | `PRECIO_CNE_CSV` | `precio_cne.csv` | CSV solo si `energy_price` nunca respondió |
 | `HEALTH_PORT` | `8080` | Puerto de `GET /health` |

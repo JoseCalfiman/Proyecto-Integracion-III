@@ -92,14 +92,22 @@ def test_get_latest_energy_price_empty_or_without_db(monkeypatch):
 
 def test_get_consumption_history_returns_daily_rows(monkeypatch):
     rows = [(date(2024, 1, 1), 120.5), (date(2024, 1, 2), 130.0)]
-    monkeypatch.setattr(db, "get_connection", _fake_get_connection(rows))
+    chamber_id = "44444444-4444-4444-4444-444444444444"
+    factory = _fake_get_connection(rows)
+    monkeypatch.setattr(db, "get_connection", factory)
 
-    history = db.get_consumption_history(days=7, chamber_id=3)
+    history = db.get_consumption_history(days=7, chamber_id=chamber_id)
 
     assert history == [
         {"date": date(2024, 1, 1), "consumption_kwh": 120.5},
         {"date": date(2024, 1, 2), "consumption_kwh": 130.0},
     ]
+    sql, params = factory.conn._cursor.executed[-1]
+    assert "SUM(consumption_kw * 10.0 / 3600.0)" in sql
+    assert "date_trunc('day', timestamp)" in sql
+    assert "id_chamber = %s" in sql
+    assert "GROUP BY day" in sql
+    assert params == (chamber_id, 7)
 
 
 def test_get_consumption_history_handles_null_sum(monkeypatch):
@@ -124,7 +132,7 @@ def test_get_consumption_history_uses_default_chamber_and_days(monkeypatch):
     db.get_consumption_history()
 
     _, params = factory.conn._cursor.executed[-1]
-    assert params == (db.CHAMBER_ID, 7)
+    assert params == ("44444444-4444-4444-4444-444444444444", 7)
 
 
 def test_get_consumption_history_rejects_non_positive_days():
@@ -182,4 +190,3 @@ def test_save_saving_recommendations_without_rows_is_noop(monkeypatch):
     assert db.save_saving_recommendations(
         target_date="2024-01-08", price_clp_kwh=145.0, recommendations=[]
     ) is True
-

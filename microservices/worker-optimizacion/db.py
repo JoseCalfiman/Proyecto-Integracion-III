@@ -21,8 +21,12 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASS = os.getenv("DB_PASS", "")
 
 # Contexto de negocio requerido por el esquema (FK NOT NULL).
-CHAMBER_ID = int(os.getenv("OPTIMIZATION_CHAMBER_ID", "1"))
-COMPANY_ID = int(os.getenv("OPTIMIZATION_COMPANY_ID", "1"))
+CHAMBER_ID = os.getenv(
+    "OPTIMIZATION_CHAMBER_ID", "44444444-4444-4444-4444-444444444444"
+)
+COMPANY_ID = os.getenv(
+    "OPTIMIZATION_COMPANY_ID", "11111111-1111-1111-1111-111111111111"
+)
 
 
 def _dsn_kwargs() -> dict[str, Any]:
@@ -96,13 +100,14 @@ def get_latest_price_id() -> int | None:
 
 def get_consumption_history(
     days: int = 7,
-    chamber_id: int | None = None,
+    chamber_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Consumo diario (kWh) de los ultimos ``days`` dias para una camara.
 
-    Agrega ``sensor_data`` por dia (``SUM(consumption_kw)``) filtrando por
-    ``chamber_id``. Devuelve una lista de ``{"date", "consumption_kwh"}`` o una
-    lista vacia si la BD no esta disponible.
+    Convierte cada lectura de potencia (kW) a energia (kWh) considerando un
+    intervalo de muestreo de 10 segundos y agrega los resultados por dia,
+    filtrando por ``chamber_id``. Devuelve una lista de
+    ``{"date", "consumption_kwh"}`` o una lista vacia si la BD no esta disponible.
     """
     if days <= 0:
         raise ValueError("days debe ser mayor o igual a 1")
@@ -113,11 +118,11 @@ def get_consumption_history(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT date_trunc('day', recorded_at) AS day,
-                       SUM(consumption_kw) AS total_kwh
+                SELECT date_trunc('day', timestamp) AS day,
+                       SUM(consumption_kw * 10.0 / 3600.0) AS total_kwh
                 FROM sensor_data
-                WHERE chamber_id = %s
-                  AND recorded_at >= NOW() - (%s * INTERVAL '1 day')
+                WHERE id_chamber = %s
+                  AND timestamp >= NOW() - (%s * INTERVAL '1 day')
                 GROUP BY day
                 ORDER BY day
                 """,
@@ -133,7 +138,7 @@ def get_consumption_history(
 def save_predicted_consumption(
     target_date: date | str,
     predicted_kwh: float,
-    chamber_id: int | None = None,
+    chamber_id: str | None = None,
 ) -> bool:
     with get_connection() as conn:
         if conn is None:
@@ -155,8 +160,8 @@ def save_saving_recommendations(
     price_clp_kwh: float,
     recommendations: list[dict[str, Any]],
     price_id: int | None = None,
-    company_id: int | None = None,
-    chamber_id: int | None = None,
+    company_id: str | None = None,
+    chamber_id: str | None = None,
 ) -> bool:
     if not recommendations:
         return True
