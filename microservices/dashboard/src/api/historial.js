@@ -1,6 +1,8 @@
 import apiClient from './client';
 
-// obtener el historial de mediciones
+// Filtros: { id_chamber: UUID, desde: ISO8601, hasta: ISO8601, limit?: 1..10000 }.
+// Devuelve [{ id_data, id_chamber, timestamp, temperature, consumption_kw }].
+// Las fechas sin zona horaria se interpretan en UTC; hasta sin hora incluye el día completo.
 export const getHistorial = async (filtros = {}) => {
   try {
     const response = await apiClient.get('/historial', { params: filtros });

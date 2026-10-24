@@ -83,3 +83,21 @@ Para aplicar los cambios al servicio:
 docker compose up -d --no-deps --build --force-recreate ingesta
 docker compose logs --since 1m -f ingesta
 ```
+
+### Historial de mediciones
+
+`GET /api/v1/historial?id_chamber=<UUID>&desde=2026-10-01&hasta=2026-10-24&limit=1000`
+
+- `id_chamber`, `desde` y `hasta` son obligatorios.
+- Las fechas aceptan `YYYY-MM-DD` o fecha/hora ISO 8601. Sin zona horaria se interpretan en UTC. Una fecha `hasta` sin hora incluye todo ese día UTC; con hora, incluye ese instante exacto.
+- `limit` es opcional (1000 por defecto; entre 1 y 10000). Se devuelven las primeras lecturas del intervalo en orden ascendente por `timestamp`, desempate por `id_data`.
+- Respuesta: lista JSON de objetos con `id_data`, `id_chamber`, `timestamp`, `temperature` (°C) y `consumption_kw` (kW). Las mediciones ausentes se representan con `null`; sin resultados devuelve `[]`.
+- Filtros inválidos o un intervalo invertido devuelven HTTP 422.
+
+El cliente React `getHistorial({ id_chamber, desde, hasta, limit })` devuelve esta lista directamente. La vista `HistorialView.jsx` todavía representa predicciones y usa el filtro `camara`; necesita una adaptación independiente para mostrar estas mediciones. La exportación CSV/PDF no forma parte de este endpoint.
+
+Pruebas sin PostgreSQL, MQTT ni Kafka:
+
+```bash
+venv/bin/python -m unittest discover -s microservices/ingesta/tests -p test_historial.py
+```
