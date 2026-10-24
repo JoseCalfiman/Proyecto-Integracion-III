@@ -309,6 +309,7 @@ def test_malformed_json_is_logged_and_offset_confirmed(caplog):
     _handle_kafka_message(consumer, FakeKafkaMessage(b"{invalid json", 23))
 
     assert consumer.committed_offsets == [23]
+    assert any(record.levelname == "WARNING" for record in caplog.records)
     assert "se descarta y confirma" in caplog.text
 
 
@@ -343,7 +344,12 @@ def test_valid_anomaly_contract_is_accepted_and_committed(monkeypatch):
 
     _handle_kafka_message(
         consumer,
-        FakeKafkaMessage(json.dumps(valid_anomaly_payload()).encode("utf-8"), 25),
+        FakeKafkaMessage(
+            json.dumps(
+                valid_anomaly_payload(temperature=4, remaining_time_min=16)
+            ).encode("utf-8"),
+            25,
+        ),
     )
 
     assert consumer.committed_offsets == [25]
@@ -374,6 +380,26 @@ def test_contract_accepts_matching_chamber_aliases():
     normalized = kafka_consumer._validate_anomaly_contract(payload)
 
     assert normalized["id_chamber"] == UUID(CHAMBER_ID)
+
+
+def test_contract_normalizes_numeric_categories_and_recorded_at():
+    payload = valid_anomaly_payload(
+        temperature=5,
+        remaining_time_min=10,
+        severity=" HIGH ",
+        risk_level=" medio ",
+        recorded_at=" 2025-01-02T03:04:05Z ",
+    )
+
+    normalized = kafka_consumer._validate_anomaly_contract(payload)
+
+    assert normalized["id_chamber"] == UUID(CHAMBER_ID)
+    assert normalized["id_prediction"] == 17
+    assert normalized["temperature"] == 5.0
+    assert normalized["remaining_time_min"] == 10.0
+    assert normalized["severity"] == "high"
+    assert normalized["risk_level"] == "MEDIO"
+    assert normalized["recorded_at"] == "2025-01-02T03:04:05+00:00"
 
 
 @pytest.mark.parametrize(
@@ -442,7 +468,10 @@ def test_missing_required_contract_field_is_logged_and_committed(field, caplog):
     )
 
     assert consumer.committed_offsets == [26]
-    assert field in caplog.text
+    assert any(
+        record.levelname == "WARNING" and field in record.message
+        for record in caplog.records
+    )
     assert "se descarta y confirma" in caplog.text
 
 
@@ -457,20 +486,32 @@ def test_missing_required_contract_field_is_logged_and_committed(field, caplog):
         ("risk_level", None),
         ("recorded_at", None),
         ("id_chamber", "not-a-uuid"),
+        ("id_chamber", 1234),
         ("id_prediction", "17"),
         ("id_prediction", 0),
         ("id_prediction", 2**63),
+        ("id_prediction", True),
+        ("id_prediction", 17.0),
         ("temperature", "5.0"),
         ("temperature", True),
+        ("temperature", [5.0]),
         ("temperature", float("nan")),
         ("temperature", float("inf")),
+        ("temperature", float("-inf")),
+        ("temperature", 10**400),
+        ("remaining_time_min", True),
         ("remaining_time_min", -0.1),
         ("remaining_time_min", float("nan")),
+        ("remaining_time_min", float("inf")),
         ("severity", ""),
         ("severity", "urgent"),
+        ("severity", 1),
         ("risk_level", "LOW"),
+        ("risk_level", ["MEDIO"]),
+        ("recorded_at", 123),
         ("recorded_at", "not-a-date"),
         ("recorded_at", "2025-01-02"),
+        ("recorded_at", "2025-02-30T03:04:05Z"),
     ],
 )
 def test_invalid_contract_value_is_logged_and_committed(field, value, caplog):
@@ -483,8 +524,40 @@ def test_invalid_contract_value_is_logged_and_committed(field, value, caplog):
     )
 
     assert consumer.committed_offsets == [27]
-    assert field in caplog.text
+    assert any(
+        record.levelname == "WARNING" and field in record.message
+        for record in caplog.records
+    )
     assert "se descarta y confirma" in caplog.text
+
+
+def test_invalid_contract_does_not_stop_processing_next_message(monkeypatch, caplog):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    monkeypatch.setattr(
+        kafka_consumer, "get_active_rule", lambda session, chamber_id: None
+    )
+    consumer = FakeKafkaConsumer()
+    invalid_payload = valid_anomaly_payload()
+    del invalid_payload["id_prediction"]
+
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(json.dumps(invalid_payload).encode("utf-8"), 270),
+    )
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(
+            json.dumps(
+                valid_anomaly_payload(temperature=4, remaining_time_min=16)
+            ).encode("utf-8"),
+            271,
+        ),
+    )
+
+    assert consumer.committed_offsets == [270, 271]
+    assert "WARNING" in caplog.text
 
 
 def test_valid_contract_uses_predictive_decision_and_commits_after_publish(
@@ -618,7 +691,10 @@ def test_invalid_active_rule_leaves_offset_uncommitted_and_stops_processing(
     assert "offset queda sin confirmar" in caplog.text
 
 
-def test_missing_active_rule_does_not_create_alert_and_commits(monkeypatch, caplog):
+def test_missing_active_rule_uses_defaults_without_alert_and_commits(
+    monkeypatch, caplog
+):
+    caplog.set_level("INFO")
     engine = create_engine("sqlite://")
     Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
@@ -630,14 +706,74 @@ def test_missing_active_rule_does_not_create_alert_and_commits(monkeypatch, capl
     _handle_kafka_message(
         consumer,
         FakeKafkaMessage(
-            json.dumps(valid_anomaly_payload()).encode("utf-8"), 32
+            json.dumps(
+                valid_anomaly_payload(temperature=4, remaining_time_min=16)
+            ).encode("utf-8"),
+            32,
         ),
     )
 
     assert consumer.committed_offsets == [32]
     assert "No existe regla HACCP activa" in caplog.text
+    assert "regla predeterminada" in caplog.text
+    assert CHAMBER_ID in caplog.text
+    assert "sin infracciones HACCP" in caplog.text
+    assert any(
+        record.levelname == "WARNING"
+        and CHAMBER_ID in record.message
+        and "regla predeterminada" in record.message
+        for record in caplog.records
+    )
     with Session(engine) as session:
         assert session.scalar(select(GeneratedAlert)) is None
+
+
+def test_missing_active_rule_uses_defaults_and_continues_processing(
+    monkeypatch, caplog
+):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    monkeypatch.setattr(
+        kafka_consumer, "get_active_rule", lambda session, chamber_id: None
+    )
+    published = []
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", published.append)
+    consumer = FakeKafkaConsumer()
+
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(
+            json.dumps(
+                valid_anomaly_payload(temperature=5, remaining_time_min=20)
+            ).encode("utf-8"),
+            320,
+        ),
+    )
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(
+            json.dumps(
+                valid_anomaly_payload(temperature=4, remaining_time_min=16)
+            ).encode("utf-8"),
+            321,
+        ),
+    )
+
+    assert consumer.committed_offsets == [320, 321]
+    assert caplog.text.count("se utiliza la regla predeterminada") == 2
+    assert CHAMBER_ID in caplog.text
+    assert len(published) == 1
+    assert published[0]["severity"] == "medium"
+    assert published[0]["id_prediction"] == 17
+    with Session(engine) as session:
+        alert = session.scalar(select(GeneratedAlert))
+        audit = session.scalar(select(AlertAudit))
+    assert alert is not None
+    assert alert.severity == "medium"
+    assert alert.id_haccp_rule is None
+    assert audit is not None
+    assert audit.id_alert == alert.id_alert
 
 
 @pytest.mark.parametrize("delivery_failure", [False, True])

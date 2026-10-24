@@ -52,14 +52,35 @@ El worker define una regla predeterminada para `haccp_rules` en `crud.py`. `vali
 | `max_absolute_temp` | 4.00 °C | Temperatura máxima absoluta de la cámara |
 | `min_absolute_temp` | -30.00 °C | Temperatura mínima absoluta de la cámara |
 | `tolerance_time_min` | 15 min | Tiempo de tolerancia de la regla |
+| `severity` | `medium` | Severidad compatible con `haccp_rules` y `generated_alerts` |
 | `active` | `true` | Indica que la regla está activa |
 
 La evaluación legacy de lecturas y series convierte `tolerance_time_min` a una duración mínima en segundos. La decisión predictiva descrita abajo usa directamente la tolerancia en minutos y no convierte el tiempo restante en duración de exposición.
 
+### Fallback cuando no existe regla activa
+
+Si la consulta de reglas para una cámara termina correctamente y no devuelve una
+regla activa, el Worker evalúa el evento con la configuración determinista de
+`DEFAULT_RULE_VALUES`: `min_absolute_temp = -30.00 °C`,
+`max_absolute_temp = 4.00 °C`, `tolerance_time_min = 15` y `severity = medium`.
+La regla se usa sólo en memoria: no se inserta una fila en `haccp_rules` ni se
+inventa un `id_rule`. Si hay infracción, la alerta se persiste con
+`id_haccp_rule = NULL`, el `id_prediction` original, la severidad predeterminada
+y su auditoría `created`; después sigue el flujo normal de publicación. Si no
+hay infracción, no se persiste ni publica. En ambos casos se confirma el offset
+y el consumidor continúa; antes de evaluar se registra un `WARNING` que incluye
+el `id_chamber` y deja explícito el uso de la regla predeterminada.
+
+Este fallback sólo aplica al resultado `None` de una consulta completada. Los
+errores de conexión/SQLAlchemy siguen el tratamiento de errores de base de datos
+y una regla activa inválida sigue siendo un error de configuración: ninguno de
+esos casos se oculta ni se sustituye por defaults.
+
 ## Estado de integración
 
 El consumidor valida el contrato de `sensor.anomaly` y obtiene la regla HACCP
-activa para la cámara. La decisión predictiva genera una alerta si se cumple
+activa para la cámara o utiliza el fallback predeterminado documentado si no la
+hay. La decisión predictiva genera una alerta si se cumple
 cualquiera de estas condiciones:
 
 - `temperature < min_absolute_temp`
@@ -77,13 +98,13 @@ una duración de exposición. Esta decisión no lo transforma en
 `evaluate_temperature_series` y `validar_haccp` conservan su semántica para
 lecturas/series y siguen trabajando con temperatura y duración.
 
-La decisión utiliza los límites y tolerancia de la regla activa de la cámara.
-Si no existe regla activa, el evento se registra y no genera alerta. Una regla
-activa con parámetros requeridos nulos, no finitos, incompatibles, rango
+La decisión utiliza los límites y tolerancia de la regla activa de la cámara o
+los defaults sólo ante ausencia confirmada de una regla activa. Una regla activa
+con parámetros requeridos nulos, no finitos, incompatibles, rango
 invertido o tolerancia negativa se trata como error de configuración: el offset
 no se confirma y el procesamiento se detiene para evitar un ciclo de reintentos
-sin límite. La severidad persistida y publicada procede de la regla activa y
-debe ser `low`, `medium`, `high` o `critical`, valores admitidos por PostgreSQL.
+sin límite. La severidad persistida y publicada procede de la regla activa o del
+fallback `medium`, valores admitidos por PostgreSQL.
 
 ## Contrato de `sensor.anomaly`
 
@@ -91,13 +112,21 @@ El evento contiene estos siete campos obligatorios:
 
 | Campo | Tipo y restricción |
 |---|---|
-| `id_chamber` | UUID serializado como string |
+| `id_chamber` | UUID serializado como string; se normaliza a UUID |
 | `id_prediction` | Entero BIGINT positivo de `predictions.id_prediction` |
-| `temperature` | Número finito |
-| `remaining_time_min` | Número finito no negativo |
-| `severity` | `low`, `medium`, `high` o `critical` |
-| `risk_level` | `SIN_RIESGO`, `CRITICO`, `ALTO`, `MEDIO` o `BAJO` |
-| `recorded_at` | Fecha y hora ISO 8601 |
+| `temperature` | Número JSON finito; se normaliza a `float` |
+| `remaining_time_min` | Número JSON finito no negativo; se normaliza a `float` |
+| `severity` | `low`, `medium`, `high` o `critical`; se recortan espacios y normaliza a minúsculas |
+| `risk_level` | `SIN_RIESGO`, `CRITICO`, `ALTO`, `MEDIO` o `BAJO`; se recortan espacios y normaliza a mayúsculas |
+| `recorded_at` | Fecha y hora ISO 8601 parseable con separador `T`; se normaliza con `datetime.isoformat()` |
+
+`id_prediction` debe ser un entero JSON, no booleano ni string, entre `1` y
+`2**63 - 1`. Los campos numéricos no admiten booleanos, strings ni valores no
+finitos (`NaN` o infinitos); `remaining_time_min` tampoco puede ser negativo.
+El contrato no impone un rango físico adicional a `temperature`: la regla HACCP
+activa determina si su valor constituye una infracción. `recorded_at` debe incluir
+una fecha y hora real; si termina en `Z`, se representa como `+00:00` al
+normalizarlo.
 
 Ejemplo:
 
@@ -125,10 +154,13 @@ El Worker Predictivo, mantenido por otro integrante, actualmente publica
 siendo rechazados hasta coordinar e implementar esa compatibilidad en el
 microservicio Predictivo. Esta tarea no modifica ese productor.
 
-El consumidor registra y descarta los mensajes incompletos o inválidos y
-confirma esos offsets según la política existente. Un evento válido se evalúa
-con `temperature` y `remaining_time_min`; los errores de configuración de una
-regla activa quedan sin confirmar para que puedan corregirse y reprocesarse.
+El consumidor registra con nivel `WARNING` los mensajes malformados o con
+contrato incompleto/inválido, incluyendo el campo o motivo específico, los
+descarta y confirma esos offsets según la política existente. No genera alertas
+ni detiene el consumo por esos mensajes. No inventa `id_prediction`, no lo
+sustituye por `None` ni busca otra predicción. Un evento válido se evalúa con
+`temperature` y `remaining_time_min`; los errores de configuración de una regla
+activa quedan sin confirmar para que puedan corregirse y reprocesarse.
 
 ## Referencias del código
 
@@ -191,7 +223,7 @@ unitarias y no sustituye la base real. `_persist_generated_alert` guarda:
 |---|---|
 | `id_chamber` | UUID del evento, validado y normalizado |
 | `id_prediction` | Entero positivo hasta `2**63 - 1`, obligatorio en el contrato |
-| `id_haccp_rule` | `id_rule` de la regla activa obtenida para la cámara |
+| `id_haccp_rule` | `id_rule` de la regla activa; `NULL` si se usó el fallback en memoria |
 | `alert_type` | Valor fijo `haccp_violation` |
 | `severity` | Regla aplicada, con valor `low`, `medium`, `high` o `critical` |
 | `status` | Valor inicial `active` |
@@ -216,7 +248,8 @@ habilitan FK ni se presentan como evidencia de integridad referencial real.
 | Resultado o error | Comportamiento y offset |
 |---|---|
 | Contrato inválido, UUID incorrecto o campo obligatorio ausente | Registra y descarta; confirma offset |
-| Sin regla activa o sin infracción | Registra, no persiste ni publica; confirma offset |
+| Sin regla activa | Emite `WARNING` con `id_chamber`, evalúa con defaults y continúa |
+| Sin infracción, incluso con regla predeterminada | No persiste ni publica; confirma offset |
 | Regla activa inválida | Registra y propaga; no confirma |
 | `IntegrityError` o `DataError` | Registra y descarta; confirma offset sin publicar |
 | `DisconnectionError`, `InterfaceError`, `OperationalError`, timeout SQLAlchemy | Hasta tres intentos, con esperas de 1 y 2 segundos; agotamiento propaga `TransientDatabaseError` sin confirmar |

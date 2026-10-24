@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from functools import lru_cache
 from uuid import UUID
@@ -22,7 +23,7 @@ from sqlalchemy.exc import (
 from sqlalchemy.orm import Session
 
 from config import get_database_url
-from crud import get_active_rule
+from crud import DEFAULT_RULE_VALUES, get_active_rule
 from haccp_validator import (
     HaccpRuleConfigurationError,
     evaluate_predictive_event,
@@ -89,50 +90,74 @@ def _validate_anomaly_contract(payload: dict) -> dict:
             "El campo id_prediction debe ser un BIGINT positivo"
         )
 
+    normalized = payload.copy()
+    normalized["id_chamber"] = chamber_uuid
+
     for field in ("temperature", "remaining_time_min"):
         value = payload.get(field)
-        try:
-            is_finite = (
-                not isinstance(value, bool)
-                and isinstance(value, (int, float))
-                and math.isfinite(value)
-            )
-        except (OverflowError, TypeError, ValueError):
-            is_finite = False
-        if not is_finite:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise InvalidKafkaMessage(f"El campo {field} debe ser un número finito")
-        if field == "remaining_time_min" and value < 0:
+        try:
+            number = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise InvalidKafkaMessage(
+                f"El campo {field} debe ser un número finito"
+            ) from exc
+        if not math.isfinite(number):
+            raise InvalidKafkaMessage(f"El campo {field} debe ser un número finito")
+        if field == "remaining_time_min" and number < 0:
             raise InvalidKafkaMessage(
                 "El campo remaining_time_min no puede ser negativo"
             )
+        normalized[field] = number
 
     severity = payload.get("severity")
-    if not isinstance(severity, str) or severity not in ALLOWED_ALERT_SEVERITIES:
+    if not isinstance(severity, str):
         raise InvalidKafkaMessage(
             "El campo severity debe ser uno de: "
             + ", ".join(sorted(ALLOWED_ALERT_SEVERITIES))
         )
+    severity = severity.strip().lower()
+    if severity not in ALLOWED_ALERT_SEVERITIES:
+        raise InvalidKafkaMessage(
+            "El campo severity debe ser uno de: "
+            + ", ".join(sorted(ALLOWED_ALERT_SEVERITIES))
+        )
+    normalized["severity"] = severity
 
     risk_level = payload.get("risk_level")
-    if not isinstance(risk_level, str) or risk_level not in ALLOWED_RISK_LEVELS:
+    if not isinstance(risk_level, str):
         raise InvalidKafkaMessage(
             "El campo risk_level no coincide con las categorías del predictor"
         )
+    risk_level = risk_level.strip().upper()
+    if risk_level not in ALLOWED_RISK_LEVELS:
+        raise InvalidKafkaMessage(
+            "El campo risk_level no coincide con las categorías del predictor"
+        )
+    normalized["risk_level"] = risk_level
 
     recorded_at = payload.get("recorded_at")
-    if not isinstance(recorded_at, str) or "T" not in recorded_at.upper():
+    if not isinstance(recorded_at, str):
+        raise InvalidKafkaMessage(
+            "El campo recorded_at debe ser una fecha y hora ISO 8601"
+        )
+    recorded_at = recorded_at.strip()
+    if "T" not in recorded_at.upper():
         raise InvalidKafkaMessage(
             "El campo recorded_at debe ser una fecha y hora ISO 8601"
         )
     try:
-        datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
-    except ValueError as exc:
+        parsed_recorded_at = datetime.fromisoformat(
+            recorded_at[:-1] + "+00:00"
+            if recorded_at.endswith("Z")
+            else recorded_at
+        )
+    except (OverflowError, ValueError) as exc:
         raise InvalidKafkaMessage(
             "El campo recorded_at debe ser una fecha y hora ISO 8601 válida"
         ) from exc
-
-    normalized = payload.copy()
-    normalized["id_chamber"] = chamber_uuid
+    normalized["recorded_at"] = parsed_recorded_at.isoformat()
     return normalized
 
 
@@ -196,10 +221,18 @@ def process_alert(payload: dict) -> None:
     with Session(get_engine()) as session:
         rule = get_active_rule(session, chamber_id)
         if rule is None:
-            logger.warning("No existe regla HACCP activa para la cámara %s", chamber_id)
-            return
+            logger.warning(
+                "No existe regla HACCP activa para la cámara %s; "
+                "se utiliza la regla predeterminada",
+                chamber_id,
+            )
+            rule = DEFAULT_RULE_VALUES.copy()
 
-        rule_severity = rule.severity
+        rule_severity = (
+            rule.get("severity")
+            if isinstance(rule, Mapping)
+            else getattr(rule, "severity", None)
+        )
         if (
             not isinstance(rule_severity, str)
             or rule_severity not in ALLOWED_ALERT_SEVERITIES
@@ -260,7 +293,7 @@ def _handle_kafka_message(consumer: Consumer, message) -> None:
         json.JSONDecodeError,
         InvalidKafkaMessage,
     ) as exc:
-        logger.error("Mensaje Kafka inválido; se descarta y confirma el offset: %s", exc)
+        logger.warning("Mensaje Kafka inválido; se descarta y confirma el offset: %s", exc)
         consumer.commit(message=message, asynchronous=False)
         return
 
@@ -268,7 +301,7 @@ def _handle_kafka_message(consumer: Consumer, message) -> None:
         try:
             process_alert(payload)
         except InvalidKafkaMessage as exc:
-            logger.error(
+            logger.warning(
                 "Mensaje inválido para la cámara %s; se descarta y confirma "
                 "el offset: %s",
                 payload.get("id_chamber") or payload.get("chamber_id"),

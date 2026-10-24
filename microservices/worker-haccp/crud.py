@@ -14,6 +14,7 @@ DEFAULT_RULE_VALUES = {
     "max_absolute_temp": Decimal("4.00"),
     "min_absolute_temp": Decimal("-30.00"),
     "tolerance_time_min": 15,
+    "severity": "medium",
     "active": True,
 }
 
