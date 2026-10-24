@@ -28,7 +28,30 @@ spec:
           echo "TimescaleDB disponible!"
       containers:
       - name: worker-predictivo
-        image: aamonsalve/cryometric-worker-predictivo:latest
+        image: tiusko/cryometric-worker-predictivo:latest
+        ports:
+        - containerPort: 8000
+
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+          failureThreshold: 30
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+
         envFrom:
         - configMapRef:
             name: app-config
@@ -38,4 +61,4 @@ spec:
             cpu: "50m"
           limits:
             memory: "256Mi"
-            cpu: "100m"
+            cpu: "500m"

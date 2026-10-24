@@ -1,4 +1,5 @@
 FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1
 
 # Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
@@ -15,4 +16,4 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
-CMD ["python", "kafka_consumer.py"]
+CMD ["python", "main.py"]
