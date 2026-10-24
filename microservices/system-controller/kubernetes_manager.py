@@ -1,12 +1,14 @@
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger("system-controller")
 
 NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 REQUEST_TIMEOUT_SECONDS = 3
+RESTART_ANNOTATION = "kubectl.kubernetes.io/restartedAt"
 
 
 @dataclass(frozen=True)
@@ -14,6 +16,17 @@ class WorkloadInfo:
     desired: int
     ready: int
     restarts: Optional[int]  
+
+
+@dataclass(frozen=True)
+class RestartOutcome:
+    kind: str 
+    requested_at: datetime  
+
+class RestartError(Exception):
+    def __init__(self, reason: str, message: str):
+        super().__init__(message)
+        self.reason = reason
 
 
 class KubernetesManager:
@@ -107,3 +120,50 @@ class KubernetesManager:
             return WorkloadInfo(desired=desired, ready=ready, restarts=self._count_restarts(match_labels))
         logger.warning("Workload '%s' no encontrado en el namespace '%s'", name, self.namespace)
         return None
+
+    def _patch_workload(self, kind: str, name: str, body: dict) -> None:
+        patch = (
+            self._apps.patch_namespaced_stateful_set
+            if kind == "StatefulSet"
+            else self._apps.patch_namespaced_deployment
+        )
+        response = patch(
+            name, self.namespace, body,
+            _request_timeout=REQUEST_TIMEOUT_SECONDS, _preload_content=False,
+        )
+        release = getattr(response, "release_conn", None)
+        if release:
+            release()
+
+    def restart_workload(self, name: str, kind: str = "Deployment") -> RestartOutcome:
+        if not self.available:
+            raise RestartError("unavailable", "Sin acceso a la API de Kubernetes")
+        from kubernetes.client.rest import ApiException
+
+        requested_at = datetime.now(timezone.utc).replace(microsecond=0)
+        body = {
+            "spec": {
+                "template": {
+                    "metadata": {
+                        "annotations": {RESTART_ANNOTATION: requested_at.strftime("%Y-%m-%dT%H:%M:%SZ")}
+                    }
+                }
+            }
+        }
+        kinds = [kind] + [k for k in ("Deployment", "StatefulSet") if k != kind]
+        for k in kinds:
+            try:
+                self._patch_workload(k, name, body)
+            except ApiException as exc:
+                if exc.status == 404:
+                    continue
+                if exc.status == 403:
+                    logger.warning("Sin permiso para parchar %s/%s (HTTP 403)", k, name)
+                    raise RestartError("forbidden", "El ServiceAccount no tiene permiso patch") from None
+                logger.warning("No se pudo parchar %s/%s (HTTP %s)", k, name, exc.status)
+                raise RestartError("failed", f"La API de Kubernetes respondió HTTP {exc.status}") from None
+            except Exception as exc:
+                logger.warning("Error parchando %s/%s: %s: %s", k, name, type(exc).__name__, exc)
+                raise RestartError("failed", "No se pudo contactar la API de Kubernetes") from None
+            return RestartOutcome(kind=k, requested_at=requested_at)
+        raise RestartError("not_found", f"El workload '{name}' no existe en el namespace '{self.namespace}'")

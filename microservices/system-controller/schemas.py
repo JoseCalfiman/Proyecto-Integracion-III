@@ -44,3 +44,10 @@ class SystemStatus(BaseModel):
     checked_at: datetime
     summary: Summary
     components: List[ComponentStatus]
+
+class RestartResponse(BaseModel):
+    name: str
+    action: str = "restart"
+    status: str = "RESTART_REQUESTED"
+    requested_at: datetime
+    message: str = "Reinicio solicitado. El estado se actualizará en /api/v1/system/status."
