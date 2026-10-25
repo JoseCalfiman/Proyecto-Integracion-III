@@ -2,8 +2,9 @@ import json
 import os
 import signal
 import threading
+import time
 
-from confluent_kafka import Consumer, KafkaError
+from confluent_kafka import Consumer, KafkaError, KafkaException
 
 from buffer import ReadingsBuffer, get_buffer, normalize_reading
 
@@ -46,10 +47,15 @@ def consume(consumer, stop_event, buffer: ReadingsBuffer | None = None):
         msg = consumer.poll(timeout=1.0)
         if msg is None:
             continue
-        if msg.error():
-            if msg.error().code() == KafkaError._PARTITION_EOF:
+        error = msg.error()
+        if error:
+            if error.code() == KafkaError._PARTITION_EOF:
                 continue
-            raise KafkaError(msg.error())
+            if error.fatal():
+                raise KafkaException(error)
+            print(f"[kafka_consumer] error transitorio en {TOPIC}: {error}; se reintentará")
+            time.sleep(1)
+            continue
         process_message(msg.value(), buffer)
 
 def main():

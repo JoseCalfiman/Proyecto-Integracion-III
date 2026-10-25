@@ -62,10 +62,9 @@ no se crea un job adicional para el inicio.
 | `KAFKA_TOPIC` | `sensor.raw` | Tópico de lecturas de sensores |
 | `KAFKA_REPORT_TOPIC` | `optimization.reports` | Tópico de salida |
 | `KAFKA_GROUP_ID` | `worker-optimizacion` | Grupo de consumo |
-| `DB_HOST` / `DB_PORT` | `localhost` / `5432` | Conexión a la base de datos |
-| `DB_NAME` / `DB_USER` / `DB_PASS` | `postgres` / `postgres` / — | Credenciales |
+| `DB_HOST` / `DB_PORT` | `localhost` / `5432` | Conexión a la base de datos (en Docker Compose, `DB_HOST=timescaledb`) |
+| `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `frigorifico` / `admin` / `admin123` | Credenciales PostgreSQL |
 | `OPTIMIZATION_CHAMBER_ID` | `44444444-4444-4444-4444-444444444444` | Cámara asociada a las recomendaciones (FK del esquema) |
-| `OPTIMIZATION_COMPANY_ID` | `11111111-1111-1111-1111-111111111111` | Empresa asociada a las recomendaciones (FK del esquema) |
 | `OPTIMIZATION_RUN_ON_START` | `false` | Con `true`, ejecuta el primer ciclo al iniciar; activado para el Deployment de demo |
 | `PRECIO_CNE_CSV` | `precio_cne.csv` | CSV solo si `energy_price` nunca respondió |
 | `HEALTH_PORT` | `8080` | Puerto de `GET /health` |
@@ -97,14 +96,17 @@ El esquema del proyecto se define en `database/init.sql`. El worker escribe en:
 
 - `energy_price`: lee el último `id_price` y `price_kwh` por `queried_at`.
   Si la lectura falla, reutiliza el último precio y deja un WARNING. No hay precio fijo.
-- `predicted_consumption`: inserta el consumo diario predicho (`chamber_id`,
+- `predicted_consumption`: inserta el consumo diario predicho (`id_chamber`,
   `prediction_date`, `predicted_consumption_kw`).
-- `saving_recommendations`: inserta las recomendaciones (`company_id`,
-  `chamber_id`, `price_id`, `action`, `savings_percentage`, `amount_clp`,
-  `justification`, `status`).
+- `saving_recommendation`: inserta recomendaciones con las columnas oficiales
+  (`id_chamber`, `id_price`, `action`, `expected_saving_pct`,
+  `expected_saving_amount`, `rationale`, `status`).
 
-La cámara y la empresa se toman de `OPTIMIZATION_CHAMBER_ID` y
-`OPTIMIZATION_COMPANY_ID` (por defecto `1`).
+La cámara se toma de `OPTIMIZATION_CHAMBER_ID` y debe ser un UUID existente en
+`chambers.id_chamber` (el valor predeterminado corresponde a los seeds del proyecto).
+Antes de calcular, el worker valida que la conexión funcione, que las columnas
+consultadas/escritas existan en las tablas oficiales y que el UUID de cámara exista.
+Si alguna comprobación falla, omite el cálculo y registra el error en el log.
 
 ## Ejecución
 

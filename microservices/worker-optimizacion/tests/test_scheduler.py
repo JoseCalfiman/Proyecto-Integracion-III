@@ -65,6 +65,7 @@ def _fake_forecast():
 def test_run_optimization_persists_then_publishes(monkeypatch):
     calls = []
     forecast_inputs = []
+    monkeypatch.setattr(sched.db, "validate_schema", lambda: True)
     monkeypatch.setattr(
         sched.db,
         "get_consumption_history",
@@ -111,6 +112,7 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
 def test_run_optimization_skips_without_data(monkeypatch):
     published = []
     health.reset()
+    monkeypatch.setattr(sched.db, "validate_schema", lambda: True)
     monkeypatch.setattr(sched.db, "get_consumption_history", lambda days: [])
     monkeypatch.setattr(
         sched, "forecast_daily_consumption", lambda df, horizon: None
@@ -131,6 +133,7 @@ def test_worker_warns_and_does_not_invent_prediction_when_data_is_missing(
 
     saved = []
     published = []
+    monkeypatch.setattr(sched.db, "validate_schema", lambda: True)
     monkeypatch.setattr(sched.db, "get_consumption_history", lambda days: [])
     monkeypatch.setattr(sched.db, "save_report", lambda report: saved.append(report) or True)
     monkeypatch.setattr(sched, "publish_report", lambda report: published.append(report))
@@ -150,6 +153,7 @@ def test_worker_warns_and_does_not_invent_prediction_when_data_is_missing(
 
 def test_run_optimization_skips_without_price(monkeypatch):
     published = []
+    monkeypatch.setattr(sched.db, "validate_schema", lambda: True)
     monkeypatch.setattr(sched.db, "get_consumption_history", lambda days: [])
     monkeypatch.setattr(
         sched, "forecast_daily_consumption", lambda df, horizon: _fake_forecast()
@@ -159,3 +163,14 @@ def test_run_optimization_skips_without_price(monkeypatch):
 
     assert sched.run_optimization() is None
     assert published == []
+
+
+def test_run_optimization_skips_when_database_schema_is_invalid(monkeypatch):
+    calculated = []
+    monkeypatch.setattr(sched.db, "validate_schema", lambda: False)
+    monkeypatch.setattr(
+        sched, "forecast_daily_consumption", lambda *args, **kwargs: calculated.append(True)
+    )
+
+    assert sched.run_optimization() is None
+    assert calculated == []

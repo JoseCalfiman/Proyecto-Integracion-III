@@ -33,6 +33,13 @@ def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
     Devuelve el reporte publicado o ``None`` si no hay datos suficientes.
     """
     buf = buffer if buffer is not None else get_buffer()
+    if not db.validate_schema():
+        logger.error(
+            "[scheduler] base de datos o esquema incompatible; "
+            "se omite la optimización"
+        )
+        return None
+
     history = db.get_consumption_history(days=7)
     if history:
         df = pd.DataFrame(
