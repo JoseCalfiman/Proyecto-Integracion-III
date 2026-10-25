@@ -269,3 +269,47 @@ def test_save_saving_recommendations_without_rows_is_noop(monkeypatch):
     assert db.save_saving_recommendations(
         target_date="2024-01-08", price_clp_kwh=145.0, recommendations=[]
     ) is True
+
+
+def test_save_report_accepts_optimization_reports_wire_fields(monkeypatch):
+    chamber_id = "44444444-4444-4444-4444-444444444444"
+    saved_predictions = []
+    saved_recommendations = []
+    monkeypatch.setattr(
+        db,
+        "save_predicted_consumption",
+        lambda **kwargs: saved_predictions.append(kwargs) or True,
+    )
+    monkeypatch.setattr(
+        db,
+        "save_saving_recommendations",
+        lambda **kwargs: saved_recommendations.append(kwargs) or True,
+    )
+
+    assert db.save_report(
+        {
+            "id_chamber": chamber_id,
+            "prediction_date": "2026-10-26",
+            "predicted_kwh": 580.0,
+            "price_kwh": 145.5,
+            "id_price": 1,
+            "recommendations": [{"action": "apagar"}],
+        }
+    ) is True
+
+    assert saved_predictions == [
+        {
+            "target_date": "2026-10-26",
+            "predicted_kwh": 580.0,
+            "id_chamber": chamber_id,
+        }
+    ]
+    assert saved_recommendations == [
+        {
+            "target_date": "2026-10-26",
+            "price_clp_kwh": 145.5,
+            "recommendations": [{"action": "apagar"}],
+            "id_price": 1,
+            "id_chamber": chamber_id,
+        }
+    ]

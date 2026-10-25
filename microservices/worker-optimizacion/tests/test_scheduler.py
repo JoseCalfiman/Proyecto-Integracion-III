@@ -96,8 +96,11 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
     report = sched.run_optimization()
 
     assert report["type"] == "optimization_report"
-    assert report["target_date"] == "2024-01-08"
-    assert report["forecasted_kwh"] == 580.0
+    assert report["id_chamber"] == sched.db.ID_CHAMBER
+    assert report["prediction_date"] == "2024-01-08"
+    assert report["predicted_kwh"] == 580.0
+    assert report["price_kwh"] == 145.0
+    assert "generated_at" in report
     assert report["id_price"] == 7
     assert report["estimated_savings"] == 2465.0
     assert forecast_inputs[0].to_dict("records") == [

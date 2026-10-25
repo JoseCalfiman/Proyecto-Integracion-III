@@ -108,6 +108,14 @@ Antes de calcular, el worker valida que la conexión funcione, que las columnas
 consultadas/escritas existan en las tablas oficiales y que el UUID de cámara exista.
 Si alguna comprobación falla, omite el cálculo y registra el error en el log.
 
+## Evento Kafka `optimization.reports`
+
+El productor publica el UUID de cámara como clave Kafka (UTF-8) y un JSON con
+`id_chamber`, `prediction_date`, `predicted_kwh`, `price_kwh`, `recommendations`
+y `generated_at` (UTC ISO 8601). También incluye intervalos de predicción y
+resumen de ahorros. El productor espera el callback de entrega hasta 10 segundos;
+si Kafka informa un error o vence el tiempo, la publicación falla explícitamente.
+
 ## Ejecución
 
 Local:

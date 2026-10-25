@@ -262,15 +262,23 @@ def save_saving_recommendations(
 
 def save_report(report: dict[str, Any]) -> bool:
     """Persiste la prediccion de consumo y las recomendaciones de ahorro."""
-    target_date = report.get("target_date")
-    price = report.get("forecasted_kwh_cost") or report.get("price_clp_kwh") or 0.0
+    target_date = report.get("prediction_date") or report.get("target_date")
+    price = report.get("price_kwh")
+    if price is None:
+        price = report.get("forecasted_kwh_cost")
+    if price is None:
+        price = report.get("price_clp_kwh", 0.0)
+    id_chamber = report.get("id_chamber")
 
     ok = True
-    predicted_kwh = report.get("forecasted_kwh")
+    predicted_kwh = report.get("predicted_kwh")
+    if predicted_kwh is None:
+        predicted_kwh = report.get("forecasted_kwh")
     if predicted_kwh is not None:
         ok = save_predicted_consumption(
             target_date=target_date,
             predicted_kwh=predicted_kwh,
+            id_chamber=id_chamber,
         ) and ok
 
     id_price = report.get("id_price")
@@ -282,5 +290,6 @@ def save_report(report: dict[str, Any]) -> bool:
         price_clp_kwh=price,
         recommendations=report.get("recommendations", []),
         id_price=id_price,
+        id_chamber=id_chamber,
     ) and ok
     return ok

@@ -1,7 +1,11 @@
 from __future__ import annotations
+
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
+
 from confluent_kafka import Producer
 from ahorro import Action, calcular_ahorro_action
 
@@ -11,8 +15,9 @@ BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 # Ventana horaria de alto costo por defecto.
 DEFAULT_HIGH_COST_WINDOW = ["18:00", "22:00"]
 
-# Costo diario proyectado por defecto cuando no hay prediccion disponible.
+# Costo diario estimado para el mensaje de prueba sin una prediccion.
 DEFAULT_PROJECTED_DAILY_COST = 580.0
+DELIVERY_TIMEOUT_SECONDS = 10.0
 
 # Potencia nominal (kW) de los equipos candidatos.
 EQUIPMENT_POWER_KW = {
@@ -38,35 +43,34 @@ ACTIONS = [
 
 
 def build_recommendation(
-    forecasted_kwh: float | None = None,
-    price_clp_kwh: float | None = None,
-    target_date: str | None = None,
+    *,
+    id_chamber: str,
+    prediction_date: str,
+    price_kwh: float,
+    predicted_kwh: float | None = None,
     high_cost_window: list[str] | None = None,
-    forecasted_kwh_lower: float | None = None,
-    forecasted_kwh_upper: float | None = None,
+    predicted_kwh_lower: float | None = None,
+    predicted_kwh_upper: float | None = None,
     id_price: int | None = None,
+    generated_at: str | None = None,
 ) -> dict[str, Any]:
-    """Construye el reporte de optimizacion.
-
-    Cuando ``forecasted_kwh`` es ``None`` se mantienen los valores de ejemplo
-    (compatibilidad con la ejecucion standalone de este modulo).
-
-    ``price_clp_kwh`` debe venir de ``energy_price``. No hay precio fijo.
-    """
-    if price_clp_kwh is None:
-        raise ValueError("price_clp_kwh es obligatorio; leelo desde energy_price")
+    """Construye el evento con el contrato de ``optimization.reports``."""
+    try:
+        chamber_key = str(UUID(id_chamber))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("id_chamber debe ser un UUID válido") from exc
 
     recommendations: list[dict[str, Any]] = []
     total_savings = 0.0
 
-    if forecasted_kwh is not None:
-        projected_daily_cost = forecasted_kwh * price_clp_kwh
+    if predicted_kwh is not None:
+        projected_daily_cost = predicted_kwh * price_kwh
     else:
         projected_daily_cost = DEFAULT_PROJECTED_DAILY_COST
 
     for action in ACTIONS:
         potencia_kw = EQUIPMENT_POWER_KW[action.equipment]
-        savings = calcular_ahorro_action(action, potencia_kw, price_clp_kwh)
+        savings = calcular_ahorro_action(action, potencia_kw, price_kwh)
         total_savings += savings
         savings_percentage = (
             round(savings / projected_daily_cost * 100, 2)
@@ -86,11 +90,13 @@ def build_recommendation(
 
     report: dict[str, Any] = {
         "type": "optimization_report",
-        "target_date": target_date or "2024-01-08",
-        "forecasted_kwh": forecasted_kwh,
-        "forecasted_kwh_lower": forecasted_kwh_lower,
-        "forecasted_kwh_upper": forecasted_kwh_upper,
-        "forecasted_kwh_cost": price_clp_kwh,
+        "id_chamber": chamber_key,
+        "prediction_date": prediction_date,
+        "predicted_kwh": predicted_kwh,
+        "predicted_kwh_lower": predicted_kwh_lower,
+        "predicted_kwh_upper": predicted_kwh_upper,
+        "price_kwh": price_kwh,
+        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "projected_daily_cost": projected_daily_cost,
         "high_cost_window": high_cost_window or DEFAULT_HIGH_COST_WINDOW,
         "estimated_savings": total_savings,
@@ -117,32 +123,59 @@ def publish_report(
     report: dict[str, Any],
     producer: Producer | None = None,
     topic: str = REPORT_TOPIC,
-) -> Producer:
+) -> bool:
+    """Publica con clave de cámara y espera el callback de entrega de Kafka."""
+    chamber_id = report.get("id_chamber")
+    if not chamber_id:
+        raise ValueError("el reporte debe incluir id_chamber para usarlo como key")
 
     if producer is None:
         producer = build_producer()
 
     payload = json.dumps(report, ensure_ascii=False)
-    producer.produce(topic, value=payload.encode("utf-8"), callback=on_delivery)
+    delivery: dict[str, Any] = {"called": False, "error": None}
+
+    def delivery_callback(err, msg) -> None:
+        on_delivery(err, msg)
+        delivery["called"] = True
+        delivery["error"] = err
+
+    producer.produce(
+        topic,
+        key=str(chamber_id).encode("utf-8"),
+        value=payload.encode("utf-8"),
+        callback=delivery_callback,
+    )
     producer.poll(0)
-    return producer
+    pending = producer.flush(DELIVERY_TIMEOUT_SECONDS)
+    if pending:
+        raise TimeoutError(
+            f"Kafka no confirmó la entrega del reporte; quedan {pending} mensaje(s)"
+        )
+    if not delivery["called"]:
+        raise RuntimeError("Kafka terminó el flush sin invocar el callback de entrega")
+    if delivery["error"] is not None:
+        raise RuntimeError(f"Kafka no entregó el reporte: {delivery['error']}")
+    return True
 
 """Encola y envía un mensaje de prueba con datos de ejemplo."""
 def main() -> None:
+    from db import ID_CHAMBER
     from price import get_current_quote
 
     quote = get_current_quote()
     if quote is None:
         print("[kafka_producer] no hay precio en energy_price; no se publica")
         return
-    producer = publish_report(
+    publish_report(
         build_recommendation(
-            price_clp_kwh=float(quote["price_kwh"]),
+            id_chamber=ID_CHAMBER,
+            prediction_date=datetime.now(timezone.utc).date().isoformat(),
+            price_kwh=float(quote["price_kwh"]),
             id_price=quote["id_price"] if quote["id_price"] is not None else None,
         )
     )
-    producer.flush()
-    print(f"[kafka_producer] flush completado en {REPORT_TOPIC}")
+    print(f"[kafka_producer] entrega confirmada en {REPORT_TOPIC}")
 
 if __name__ == "__main__":
     main()

@@ -67,16 +67,17 @@ def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
         return None
 
     future = forecast.iloc[-FORECAST_HORIZON:]
-    target_date = pd.Timestamp(future["ds"].iloc[-1]).date().isoformat()
+    prediction_date = pd.Timestamp(future["ds"].iloc[-1]).date().isoformat()
     predicted_kwh = float(future["yhat"].iloc[-1])
     id_price = quote["id_price"]
 
     report = build_recommendation(
-        forecasted_kwh=predicted_kwh,
-        forecasted_kwh_lower=float(future["yhat_lower"].iloc[-1]),
-        forecasted_kwh_upper=float(future["yhat_upper"].iloc[-1]),
-        price_clp_kwh=float(quote["price_kwh"]),
-        target_date=target_date,
+        id_chamber=db.ID_CHAMBER,
+        prediction_date=prediction_date,
+        predicted_kwh=predicted_kwh,
+        predicted_kwh_lower=float(future["yhat_lower"].iloc[-1]),
+        predicted_kwh_upper=float(future["yhat_upper"].iloc[-1]),
+        price_kwh=float(quote["price_kwh"]),
         high_cost_window=HIGH_COST_WINDOW,
         id_price=int(id_price) if id_price is not None else None,
     )
@@ -85,7 +86,7 @@ def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
     db.save_report(report)
     publish_report(report)
     health.mark_optimization()
-    logger.info("[scheduler] reporte publicado para %s", target_date)
+    logger.info("[scheduler] reporte publicado para %s", prediction_date)
     return report
 
 
