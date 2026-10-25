@@ -2,6 +2,86 @@
 
 Este documento describe los criterios implementados por el módulo `haccp_validator.py` del worker HACCP. Los valores son parámetros técnicos del proyecto; deben contrastarse con los requisitos sanitarios aplicables al producto y a la cámara antes de usarse como límites operativos definitivos.
 
+## Health endpoint del Worker
+
+El proceso de `kafka_consumer.py` inicia un servidor HTTP concurrente con el
+consumidor Kafka. El puerto predeterminado es `8080`, configurable mediante
+`HEALTH_PORT`; el contenedor expone ese puerto. El endpoint `GET /health`
+devuelve JSON y HTTP `200` sólo cuando el loop del consumidor está operativo y
+una comprobación efectiva de Kafka mediante `AdminClient.list_topics()` tuvo
+éxito. La conectividad se comprueba en un hilo independiente cada 5 segundos,
+con timeout de 3 segundos, de forma que la comprobación HTTP y la consulta de
+metadata no bloqueen el procesamiento de mensajes.
+
+Campos de `GET /health`:
+
+| Campo | Significado |
+|---|---|
+| `status` | `starting` antes de que consumidor y chequeo de Kafka estén listos; `healthy` cuando ambos están operativos; `unhealthy` si el consumidor se detuvo, Kafka se detecta inaccesible o el consumidor devuelve un error Kafka no recuperado por un poll posterior. |
+| `kafka_connected` | Resultado del último chequeo de metadata Kafka; inicia como `false`, y no se infiere de la creación del consumidor. |
+| `last_processed_at` | Último procesamiento completado y offset confirmado, en UTC ISO 8601 (`Z`); `null` al iniciar. No requiere eventos recientes para mantener el estado healthy. |
+| `consumer_operational` | Indica que el consumidor fue creado, suscrito y mantiene su loop activo. |
+
+`/health` devuelve HTTP `503` durante el inicio o si el Worker no está
+disponible, y `200` cuando está healthy. Un mensaje inválido/rechazado o un
+fallo de procesamiento no actualizan `last_processed_at`. Un evento procesado
+correctamente sí la actualiza después de que el manejador confirme su offset
+sincrónicamente; los mensajes válidos sin infracción también cuentan como
+procesados. Si falla una publicación Kafka, el evento no se considera terminado
+y el timestamp no avanza.
+
+También existe `GET /live`, independiente de la conectividad a Kafka: devuelve
+HTTP `200` (`{"status":"alive","consumer_operational":true}`) mientras el loop
+del consumidor sigue vivo, incluso durante una desconexión temporal del broker.
+Devuelve `503` mientras inicia o si el consumidor se detuvo. No expone
+credenciales ni detalles de configuración.
+
+Ejemplo healthy:
+
+```json
+{
+  "status": "healthy",
+  "kafka_connected": true,
+  "last_processed_at": "2026-10-24T23:36:13.918000Z",
+  "consumer_operational": true
+}
+```
+
+Ejemplo iniciando o sin disponibilidad:
+
+```json
+{
+  "status": "starting",
+  "kafka_connected": false,
+  "last_processed_at": null,
+  "consumer_operational": false
+}
+```
+
+Prueba local (con las variables de configuración del Worker disponibles):
+
+```powershell
+$env:HEALTH_PORT = "8080"
+python kafka_consumer.py
+```
+
+En otra terminal, consulta `http://localhost:8080/health` y
+`http://localhost:8080/live`. Con Docker, publica el puerto además de configurar
+las variables de base de datos y Kafka:
+
+```powershell
+docker run --rm --env-file .env -p 8080:8080 worker-haccp
+```
+
+Recomendación para una futura configuración Kubernetes (los manifiestos no son
+modificados ni validados como despliegue por esta tarea):
+
+- `readinessProbe`: `GET /health`, puerto `8080`; una desconexión Kafka retira
+  al Worker del tráfico/disponibilidad sin reiniciarlo.
+- `startupProbe` y `livenessProbe`: `GET /live`, puerto `8080`. Dar margen de
+  inicio con `failureThreshold × periodSeconds`; la liveness no debe depender de
+  Kafka para evitar reinicios repetidos por una caída temporal del broker.
+
 ## Umbrales predeterminados del validador
 
 | Parámetro | Valor predeterminado | Significado |

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+from confluent_kafka import TopicPartition
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -272,6 +273,12 @@ class FakeKafkaMessage:
     def offset(self):
         return self._offset
 
+    def topic(self):
+        return kafka_consumer.TOPIC_ANOMALY
+
+    def partition(self):
+        return 0
+
 
 class FakeKafkaConsumer:
     def __init__(self):
@@ -279,6 +286,13 @@ class FakeKafkaConsumer:
 
     def commit(self, message, asynchronous):
         self.committed_offsets.append(message.offset())
+        return [
+            TopicPartition(
+                message.topic(),
+                message.partition(),
+                message.offset() + 1,
+            )
+        ]
 
 
 def test_invalid_message_is_logged_discarded_and_offset_confirmed(monkeypatch, caplog):
@@ -818,7 +832,7 @@ def test_persist_delivery_and_offset_order(monkeypatch, delivery_failure):
     class Consumer(FakeKafkaConsumer):
         def commit(self, message, asynchronous):
             steps.append("offset_commit")
-            super().commit(message, asynchronous)
+            return super().commit(message, asynchronous)
 
     monkeypatch.setattr(kafka_producer, "Producer", Producer)
     consumer = Consumer()

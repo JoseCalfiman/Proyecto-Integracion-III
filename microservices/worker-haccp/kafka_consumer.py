@@ -6,9 +6,11 @@ import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from functools import lru_cache
+from threading import Event, Thread
 from uuid import UUID
 
-from confluent_kafka import Consumer, KafkaError
+from confluent_kafka import Consumer, KafkaError, KafkaException
+from confluent_kafka.admin import AdminClient
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import (
@@ -28,6 +30,7 @@ from haccp_validator import (
     HaccpRuleConfigurationError,
     evaluate_predictive_event,
 )
+from health import HealthHTTPServer, WorkerHealth, create_health_handler
 from kafka_producer import publish_haccp_alert
 from models import AlertAudit, GeneratedAlert
 
@@ -40,6 +43,10 @@ ALLOWED_RISK_LEVELS = frozenset({"SIN_RIESGO", "CRITICO", "ALTO", "MEDIO", "BAJO
 MAX_BIGINT = 2**63 - 1
 MAX_DATABASE_ATTEMPTS = 3
 DATABASE_RETRY_DELAY_SECONDS = 1
+HEALTH_PORT_ENV = "HEALTH_PORT"
+DEFAULT_HEALTH_PORT = 8080
+KAFKA_HEALTH_CHECK_INTERVAL_SECONDS = 5
+KAFKA_HEALTH_CHECK_TIMEOUT_SECONDS = 3
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -51,6 +58,44 @@ class InvalidKafkaMessage(ValueError):
 
 class TransientDatabaseError(RuntimeError):
     """A database failure exhausted its bounded retries without committing."""
+
+
+class KafkaOffsetCommitError(RuntimeError):
+    """A synchronous Kafka offset commit did not confirm the message offset."""
+
+
+def _commit_message_offset(consumer: Consumer, message) -> None:
+    try:
+        committed_offsets = consumer.commit(message=message, asynchronous=False)
+    except KafkaException:
+        logger.exception("Falló la confirmación síncrona del offset Kafka")
+        raise
+
+    if not committed_offsets:
+        raise KafkaOffsetCommitError(
+            "Kafka no devolvió confirmación para el offset del mensaje"
+        )
+
+    expected_topic = message.topic()
+    expected_partition = message.partition()
+    expected_offset = message.offset() + 1
+    matching_offset = False
+    for committed in committed_offsets:
+        if committed.error is not None:
+            raise KafkaOffsetCommitError(
+                f"Kafka rechazó la confirmación del offset: {committed.error}"
+            )
+        if (
+            committed.topic == expected_topic
+            and committed.partition == expected_partition
+            and committed.offset == expected_offset
+        ):
+            matching_offset = True
+
+    if not matching_offset:
+        raise KafkaOffsetCommitError(
+            "Kafka no confirmó el offset esperado del mensaje"
+        )
 
 
 def _validate_anomaly_contract(payload: dict) -> dict:
@@ -281,7 +326,7 @@ def process_alert(payload: dict) -> None:
         logger.info("Alerta HACCP guardada para cámara %s", chamber_id)
 
 
-def _handle_kafka_message(consumer: Consumer, message) -> None:
+def _handle_kafka_message(consumer: Consumer, message) -> bool:
     try:
         payload = json.loads(message.value().decode("utf-8"))
         if not isinstance(payload, dict):
@@ -294,8 +339,8 @@ def _handle_kafka_message(consumer: Consumer, message) -> None:
         InvalidKafkaMessage,
     ) as exc:
         logger.warning("Mensaje Kafka inválido; se descarta y confirma el offset: %s", exc)
-        consumer.commit(message=message, asynchronous=False)
-        return
+        _commit_message_offset(consumer, message)
+        return False
 
     for attempt in range(1, MAX_DATABASE_ATTEMPTS + 1):
         try:
@@ -307,8 +352,8 @@ def _handle_kafka_message(consumer: Consumer, message) -> None:
                 payload.get("id_chamber") or payload.get("chamber_id"),
                 exc,
             )
-            consumer.commit(message=message, asynchronous=False)
-            return
+            _commit_message_offset(consumer, message)
+            return False
         except HaccpRuleConfigurationError as exc:
             logger.error(
                 "Configuración inválida de regla HACCP para la cámara %s; "
@@ -324,8 +369,8 @@ def _handle_kafka_message(consumer: Consumer, message) -> None:
                 payload.get("id_chamber") or payload.get("chamber_id"),
                 exc,
             )
-            consumer.commit(message=message, asynchronous=False)
-            return
+            _commit_message_offset(consumer, message)
+            return False
         except (
             DisconnectionError,
             InterfaceError,
@@ -356,38 +401,103 @@ def _handle_kafka_message(consumer: Consumer, message) -> None:
             )
             raise
         else:
-            consumer.commit(message=message, asynchronous=False)
-            return
+            _commit_message_offset(consumer, message)
+            return True
 
 
-def consume_anomalies() -> None:
-    get_engine()
-    consumer = Consumer(
-        {
-            "bootstrap.servers": BOOTSTRAP_SERVERS,
-            "group.id": GROUP_ID,
-            "auto.offset.reset": "earliest",
-            "enable.auto.commit": False,
-        }
-    )
-    consumer.subscribe([TOPIC_ANOMALY])
-    logger.info("Suscrito a %s", TOPIC_ANOMALY)
-
+def consume_anomalies(
+    health: WorkerHealth | None = None,
+    stop_event: Event | None = None,
+) -> None:
+    health = health or WorkerHealth()
+    stop_event = stop_event or Event()
+    consumer = None
     try:
-        while True:
+        get_engine()
+        consumer = Consumer(
+            {
+                "bootstrap.servers": BOOTSTRAP_SERVERS,
+                "group.id": GROUP_ID,
+                "auto.offset.reset": "earliest",
+                "enable.auto.commit": False,
+            }
+        )
+        consumer.subscribe([TOPIC_ANOMALY])
+        health.set_consumer_operational(True)
+        logger.info("Suscrito a %s", TOPIC_ANOMALY)
+
+        while not stop_event.is_set():
             message = consumer.poll(1.0)
             if message is None:
+                health.set_consumer_poll_error(False)
                 continue
             if message.error():
                 if message.error().code() == KafkaError._PARTITION_EOF:
+                    health.set_consumer_poll_error(False)
                     continue
                 logger.error("Error Kafka: %s", message.error())
+                health.set_consumer_poll_error(True)
+                health.set_kafka_connected(False)
                 continue
 
-            _handle_kafka_message(consumer, message)
+            health.set_consumer_poll_error(False)
+            if _handle_kafka_message(consumer, message):
+                health.mark_processed()
     finally:
-        consumer.close()
+        health.mark_stopped()
+        if consumer is not None:
+            consumer.close()
+
+
+def _monitor_kafka_health(health: WorkerHealth, stop_event: Event) -> None:
+    admin_client = None
+    while not stop_event.is_set():
+        try:
+            if admin_client is None:
+                admin_client = AdminClient({"bootstrap.servers": BOOTSTRAP_SERVERS})
+            admin_client.list_topics(timeout=KAFKA_HEALTH_CHECK_TIMEOUT_SECONDS)
+        except Exception:
+            health.set_kafka_connected(False)
+            logger.warning("No se pudo comprobar la conectividad con Kafka", exc_info=True)
+            admin_client = None
+        else:
+            health.set_kafka_connected(True)
+        stop_event.wait(KAFKA_HEALTH_CHECK_INTERVAL_SECONDS)
+
+
+def run_worker() -> None:
+    health = WorkerHealth()
+    stop_event = Event()
+    try:
+        port = int(os.getenv(HEALTH_PORT_ENV, str(DEFAULT_HEALTH_PORT)))
+    except ValueError as exc:
+        raise RuntimeError(f"{HEALTH_PORT_ENV} debe ser un puerto entero") from exc
+    if not 1 <= port <= 65535:
+        raise RuntimeError(f"{HEALTH_PORT_ENV} debe estar entre 1 y 65535")
+
+    server = HealthHTTPServer(
+        ("0.0.0.0", port),
+        create_health_handler(health),
+    )
+    http_thread = Thread(target=server.serve_forever, name="health-http", daemon=True)
+    kafka_health_thread = Thread(
+        target=_monitor_kafka_health,
+        args=(health, stop_event),
+        name="kafka-health",
+        daemon=True,
+    )
+    try:
+        http_thread.start()
+        kafka_health_thread.start()
+        consume_anomalies(health, stop_event)
+    finally:
+        stop_event.set()
+        health.mark_stopped()
+        server.shutdown()
+        server.server_close()
+        http_thread.join(timeout=2)
+        kafka_health_thread.join(timeout=KAFKA_HEALTH_CHECK_TIMEOUT_SECONDS + 1)
 
 
 if __name__ == "__main__":
-    consume_anomalies()
+    run_worker()
