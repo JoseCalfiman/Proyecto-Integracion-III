@@ -1,4 +1,5 @@
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,13 +14,14 @@ DEFAULT_RULE_VALUES = {
     "max_absolute_temp": Decimal("4.00"),
     "min_absolute_temp": Decimal("-30.00"),
     "tolerance_time_min": 15,
+    "severity": "medium",
     "active": True,
 }
 
 
 def create_default_rules_for_all_chambers(
     session: Session,
-    modified_by_user_id: str | None = None,
+    modified_by_user_id: UUID | None = None,
 ) -> list[HaccpRule]:
     """Crea una regla HACCP por defecto para cada cámara sin regla."""
     chamber_ids = session.scalars(select(Chamber.id_chamber)).all()
@@ -46,11 +48,13 @@ def create_default_rules_for_all_chambers(
     return new_rules
 
 
-def get_active_rule(session: Session, chamber_id: str) -> HaccpRule | None:
-    """Devuelve la regla HACCP activa de una cámara."""
+def get_active_rule(session: Session, chamber_id: UUID) -> HaccpRule | None:
+    """Devuelve la regla activa más recientemente revisada para una cámara."""
     return session.scalar(
-        select(HaccpRule).where(
+        select(HaccpRule)
+        .where(
             HaccpRule.id_chamber == chamber_id,
             HaccpRule.active.is_(True),
         )
+        .order_by(HaccpRule.review_date.desc())
     )
