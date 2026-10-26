@@ -33,7 +33,8 @@ spec:
         - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
           value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
         - name: KAFKA_CONTROLLER_QUORUM_VOTERS
-          value: "1@kafka-service:9093"
+          # Un único nodo broker/controller: el controlador está en este Pod.
+          value: "1@localhost:9093"
         - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
           value: "1"
         - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
@@ -42,8 +43,8 @@ spec:
           value: "-Xmx256M -Xms128M"  # ← Reducir memoria de Kafka
         resources:
           requests:
-            memory: "256Mi"
             cpu: "100m"
+            memory: "192Mi"
           limits:
+            cpu: "250m"
             memory: "512Mi"
-            cpu: "200m"

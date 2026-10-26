@@ -8,9 +8,6 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Precio de respaldo (CLP/kWh) si no hay BD ni CSV disponible.
-DEFAULT_PRICE_CLP_KWH = float(os.getenv("PRECIO_CLP_KWH", "145.0"))
-
 # Archivo CSV con precios CNE, ubicado junto a este modulo por defecto.
 DEFAULT_CSV_PATH = Path(__file__).with_name("precio_cne.csv")
 CSV_PATH = Path(os.getenv("PRECIO_CNE_CSV", str(DEFAULT_CSV_PATH)))
@@ -18,13 +15,16 @@ CSV_PATH = Path(os.getenv("PRECIO_CNE_CSV", str(DEFAULT_CSV_PATH)))
 _PRICE_FIELDS = ("precio_clp_kwh", "price_clp_kwh", "precio", "price", "valor")
 _DATE_FIELDS = ("ts", "fecha", "date", "timestamp")
 
+# Ultima lectura exitosa. Se reutiliza si falla la actualizacion.
+_last_quote: dict[str, float | int | None] | None = None
 
-def _price_from_db() -> float | None:
+
+def _price_from_db() -> dict[str, float | int] | None:
     try:
-        from db import get_latest_price
+        from db import get_latest_energy_price
     except ImportError:  # pragma: no cover - dependencia opcional
         return None
-    return get_latest_price()
+    return get_latest_energy_price()
 
 
 def _price_from_csv(path: Path | None = None) -> float | None:
@@ -58,17 +58,53 @@ def _price_from_csv(path: Path | None = None) -> float | None:
     return float(prices.iloc[-1])
 
 
-def get_current_price() -> float:
-    """Precio del kWh (CLP) desde ``energy_price``, luego CSV, luego respaldo."""
-    price = _price_from_db()
-    if price is not None:
-        return price
+def get_current_quote() -> dict[str, float | int | None] | None:
+    """Ultimo precio de ``energy_price``.
 
-    price = _price_from_csv()
-    if price is not None:
-        return price
+    Si la lectura falla y ya habia un precio, lo reutiliza y deja un WARNING.
+    No usa un valor escrito a mano en el codigo.
+    """
+    global _last_quote
 
-    logger.info(
-        "[price] usando precio de respaldo %.2f CLP/kWh", DEFAULT_PRICE_CLP_KWH
-    )
-    return DEFAULT_PRICE_CLP_KWH
+    quote: dict[str, float | int] | None = None
+    try:
+        quote = _price_from_db()
+    except Exception as exc:  # noqa: BLE001 - cualquier fallo de lectura se degrada
+        logger.warning("[price] fallo al leer energy_price: %s", exc)
+        quote = None
+
+    if quote is not None:
+        _last_quote = {
+            "id_price": quote["id_price"],
+            "price_kwh": float(quote["price_kwh"]),
+        }
+        return _last_quote
+
+    if _last_quote is not None:
+        logger.warning(
+            "[price] fallo la actualizacion de energy_price; "
+            "se reutiliza el ultimo precio %.4f CLP/kWh (id_price=%s)",
+            _last_quote["price_kwh"],
+            _last_quote["id_price"],
+        )
+        return _last_quote
+
+    csv_price = _price_from_csv()
+    if csv_price is not None:
+        logger.warning(
+            "[price] energy_price no disponible; se usa el ultimo precio del CSV %.4f CLP/kWh",
+            csv_price,
+        )
+        _last_quote = {"id_price": None, "price_kwh": csv_price}
+        return _last_quote
+
+    logger.warning("[price] no hay precio disponible en energy_price")
+    return None
+
+
+def get_current_price() -> float | None:
+    """Precio del kWh (CLP) desde ``energy_price`` o el ultimo valor conocido."""
+    quote = get_current_quote()
+    if quote is None:
+        return None
+    return float(quote["price_kwh"])

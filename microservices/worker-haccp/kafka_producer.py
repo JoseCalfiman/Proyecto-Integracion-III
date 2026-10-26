@@ -1,53 +1,58 @@
 import json
 import logging
 import os
-from datetime import datetime, timezone
 
 from confluent_kafka import Producer
 
 TOPIC_ALERTS = "haccp.alerts"
 BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+DELIVERY_TIMEOUT_SECONDS = 10.0
 
 logger = logging.getLogger(__name__)
 
 
-def _delivery_report(err, message):
-    if err is not None:
-        logger.error("Fallo al publicar en %s: %s", TOPIC_ALERTS, err)
-        return
-    logger.info("Evento publicado en %s [%s]", message.topic(), message.partition())
+class HaccpAlertPublicationError(RuntimeError):
+    """Kafka did not confirm delivery of the persisted alert."""
 
 
 def publish_haccp_alert(alert_payload: dict) -> None:
-    """Publica la alerta final HACCP en Kafka."""
-    producer = Producer({"bootstrap.servers": BOOTSTRAP_SERVERS})
-
+    """Return only after Kafka confirms delivery; propagate every delivery failure."""
     payload = {
-        "id_chamber": alert_payload.get("id_chamber"),
-        "id_prediction": alert_payload.get("id_prediction"),
-        "alert_type": "haccp_violation",
-        "severity": alert_payload.get("severity", "warning"),
-        "status": "active",
-        "message": alert_payload.get("message", "Alerta HACCP generada"),
-        "generation_date": alert_payload.get(
-            "generation_date",
-            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        ),
+        field: alert_payload[field]
+        for field in (
+            "id_alert", "id_chamber", "id_prediction", "severity", "status",
+            "message", "generation_date",
+        )
     }
+    payload["alert_type"] = alert_payload.get("alert_type", "haccp_violation")
+    delivery_confirmed = False
+    delivery_error = None
 
-    producer.produce(
-        TOPIC_ALERTS,
-        json.dumps(payload, default=str).encode("utf-8"),
-        callback=_delivery_report,
-    )
-    producer.flush()
+    def delivery_report(err, message):
+        nonlocal delivery_confirmed, delivery_error
+        delivery_confirmed = True
+        delivery_error = err
 
+    try:
+        producer = Producer({"bootstrap.servers": BOOTSTRAP_SERVERS})
+        producer.produce(
+            TOPIC_ALERTS,
+            json.dumps(payload).encode("utf-8"),
+            key=payload["id_chamber"].encode("utf-8"),
+            callback=delivery_report,
+        )
+        pending = producer.flush(DELIVERY_TIMEOUT_SECONDS)
+    except Exception as exc:
+        raise HaccpAlertPublicationError(
+            f"Fallo al publicar alerta {payload['id_alert']} en {TOPIC_ALERTS}"
+        ) from exc
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    publish_haccp_alert({
-        "id_chamber": "demo-chamber",
-        "id_prediction": 1,
-        "severity": "warning",
-        "message": "Prueba de publicación HACCP",
-    })
+    if delivery_error is not None:
+        raise HaccpAlertPublicationError(f"Error de entrega Kafka: {delivery_error}")
+    if pending != 0:
+        raise HaccpAlertPublicationError(
+            f"Timeout de entrega Kafka: {pending} mensajes pendientes"
+        )
+    if not delivery_confirmed:
+        raise HaccpAlertPublicationError("Kafka no confirmó la entrega de la alerta")
+    logger.info("Alerta %s publicada en %s", payload["id_alert"], TOPIC_ALERTS)

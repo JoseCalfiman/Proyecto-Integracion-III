@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from typing import List, Optional
 from uuid import UUID
 
@@ -12,9 +12,6 @@ from models import Chamber, GeneratedAlert, SavingRecommendation, SensorData
 from schemas import DashboardLive
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
-
-# Una lectura se considera "en vivo" si llegó dentro de esta ventana
-LIVE_WINDOW_MINUTES = 1
 
 
 def _count_active_chambers(db: Session) -> int:
@@ -33,17 +30,27 @@ def _count_active_alerts(db: Session) -> int:
 
 
 def _current_consumption_kw(db: Session) -> float:
-    """Potencia actual: suma de la última lectura de cada cámara dentro de la ventana en vivo."""
-    since = datetime.now(timezone.utc) - timedelta(minutes=LIVE_WINDOW_MINUTES)
     latest_per_chamber = (
-        db.query(SensorData.id_chamber, SensorData.consumption_kw)
-        .filter(SensorData.timestamp >= since, SensorData.consumption_kw.isnot(None))
+        db.query(
+            SensorData.id_chamber,
+            SensorData.consumption_kw,
+        )
+        .filter(
+            SensorData.consumption_kw.isnot(None),
+        )
         .distinct(SensorData.id_chamber)
-        .order_by(SensorData.id_chamber, SensorData.timestamp.desc())
+        .order_by(
+            SensorData.id_chamber,
+            SensorData.insertion_date.desc(),
+        )
         .subquery()
     )
-    total = db.query(func.sum(latest_per_chamber.c.consumption_kw)).scalar()
-    return float(total or 0)
+
+    total = db.query(
+        func.sum(latest_per_chamber.c.consumption_kw)
+    ).scalar()
+
+    return round(float(total or 0), 2)
 
 
 def _estimated_savings_clp(db: Session) -> float:

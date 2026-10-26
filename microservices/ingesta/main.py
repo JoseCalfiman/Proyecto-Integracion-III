@@ -4,8 +4,10 @@ import threading
 
 from routes import chambers, alerts, haccp, dashboard
 from mqtt_client import start as start_mqtt  # ← Importar el cliente MQTT
+from readiness import ready
 
 app = FastAPI(title="Ingesta - Smart Fridge Monitoring")
+app.add_api_route("/ready", ready, methods=["GET"])
 
 # CORS
 app.add_middleware(
