@@ -261,35 +261,206 @@ def save_saving_recommendations(
 
 
 def save_report(report: dict[str, Any]) -> bool:
-    """Persiste la prediccion de consumo y las recomendaciones de ahorro."""
+    """Guarda predicción y recomendaciones dentro de una sola transacción."""
+
     target_date = report.get("prediction_date") or report.get("target_date")
+
+    if target_date is None:
+        raise ValueError(
+            "el reporte debe incluir prediction_date o target_date"
+        )
+
+    chamber_uuid = _normalize_chamber_id(
+        report.get("id_chamber")
+    )
+
     price = report.get("price_kwh")
+
     if price is None:
         price = report.get("forecasted_kwh_cost")
+
     if price is None:
         price = report.get("price_clp_kwh", 0.0)
-    id_chamber = report.get("id_chamber")
 
-    ok = True
+    price = float(price or 0.0)
+
     predicted_kwh = report.get("predicted_kwh")
+
     if predicted_kwh is None:
         predicted_kwh = report.get("forecasted_kwh")
-    if predicted_kwh is not None:
-        ok = save_predicted_consumption(
-            target_date=target_date,
-            predicted_kwh=predicted_kwh,
-            id_chamber=id_chamber,
-        ) and ok
 
-    id_price = report.get("id_price")
-    if id_price is None:
-        id_price = get_latest_price_id()
+    recommendations = report.get("recommendations", [])
 
-    ok = save_saving_recommendations(
-        target_date=target_date,
-        price_clp_kwh=price,
-        recommendations=report.get("recommendations", []),
-        id_price=id_price,
-        id_chamber=id_chamber,
-    ) and ok
-    return ok
+    with get_connection() as conn:
+        if conn is None:
+            return False
+
+        with conn.cursor() as cur:
+
+            # ------------------------------------------------
+            # Predicción diaria:
+            # conservar una sola fila por cámara + fecha.
+            # ------------------------------------------------
+            if predicted_kwh is not None:
+
+                cur.execute(
+                    """
+                    SELECT id_consumption_prediction
+                    FROM predicted_consumption
+                    WHERE id_chamber = %s
+                      AND prediction_date = %s
+                    ORDER BY
+                        generation_date DESC,
+                        id_consumption_prediction DESC
+                    """,
+                    (
+                        chamber_uuid,
+                        target_date,
+                    ),
+                )
+
+                existing = cur.fetchall()
+
+                if existing:
+
+                    prediction_id = int(existing[0][0])
+
+                    cur.execute(
+                        """
+                        UPDATE predicted_consumption
+                        SET predicted_consumption_kw = %s,
+                            generation_date = NOW()
+                        WHERE id_consumption_prediction = %s
+                        """,
+                        (
+                            predicted_kwh,
+                            prediction_id,
+                        ),
+                    )
+
+                    # Elimina duplicados históricos del mismo día.
+                    if len(existing) > 1:
+                        cur.execute(
+                            """
+                            DELETE FROM predicted_consumption
+                            WHERE id_chamber = %s
+                              AND prediction_date = %s
+                              AND id_consumption_prediction <> %s
+                            """,
+                            (
+                                chamber_uuid,
+                                target_date,
+                                prediction_id,
+                            ),
+                        )
+
+                else:
+
+                    cur.execute(
+                        """
+                        INSERT INTO predicted_consumption
+                            (
+                                id_chamber,
+                                prediction_date,
+                                predicted_consumption_kw
+                            )
+                        VALUES (%s, %s, %s)
+                        """,
+                        (
+                            chamber_uuid,
+                            target_date,
+                            predicted_kwh,
+                        ),
+                    )
+
+            # ------------------------------------------------
+            # Precio de energía
+            # ------------------------------------------------
+
+            id_price = report.get("id_price")
+
+            if id_price is None:
+
+                cur.execute(
+                    """
+                    SELECT id_price
+                    FROM energy_price
+                    ORDER BY queried_at DESC
+                    LIMIT 1
+                    """
+                )
+
+                latest_price = cur.fetchone()
+
+                if latest_price:
+                    id_price = int(latest_price[0])
+
+            # ------------------------------------------------
+            # Reemplazar recomendaciones PENDING generadas
+            # para esta cámara y esta misma fecha.
+            # ------------------------------------------------
+
+            target_marker = (
+                f'%"target_date": "{str(target_date)}"%'
+            )
+
+            cur.execute(
+                """
+                DELETE FROM saving_recommendation
+                WHERE id_chamber = %s
+                  AND status = 'pending'
+                  AND rationale LIKE %s
+                """,
+                (
+                    chamber_uuid,
+                    target_marker,
+                ),
+            )
+
+            rows = []
+
+            for rec in recommendations:
+
+                rationale = json.dumps(
+                    {
+                        "target_date": str(target_date),
+                        "equipment": rec.get("equipment"),
+                        "window": rec.get("window"),
+                        "hours": rec.get("hours"),
+                        "price_clp_kwh": price,
+                    },
+                    ensure_ascii=False,
+                )
+
+                rows.append(
+                    (
+                        chamber_uuid,
+                        id_price,
+                        rec.get("action"),
+                        rec.get("savings_percentage"),
+                        rec.get("estimated_savings", 0),
+                        rationale,
+                        "pending",
+                    )
+                )
+
+            if rows:
+
+                cur.executemany(
+                    """
+                    INSERT INTO saving_recommendation
+                        (
+                            id_chamber,
+                            id_price,
+                            action,
+                            expected_saving_pct,
+                            expected_saving_amount,
+                            rationale,
+                            status
+                        )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    rows,
+                )
+
+    return True

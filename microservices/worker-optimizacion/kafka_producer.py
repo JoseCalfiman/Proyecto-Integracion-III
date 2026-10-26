@@ -68,15 +68,33 @@ def build_recommendation(
     else:
         projected_daily_cost = DEFAULT_PROJECTED_DAILY_COST
 
+    remaining_budget = max(projected_daily_cost, 0.0)
+
     for action in ACTIONS:
         potencia_kw = EQUIPMENT_POWER_KW[action.equipment]
-        savings = calcular_ahorro_action(action, potencia_kw, price_kwh)
-        total_savings += savings
+
+        raw_savings = calcular_ahorro_action(
+            action,
+            potencia_kw,
+            price_kwh,
+        )
+
+        # Una recomendación nunca puede ahorrar más que
+        # el costo diario total proyectado.
+        savings = min(raw_savings, remaining_budget)
+
         savings_percentage = (
-            round(savings / projected_daily_cost * 100, 2)
-            if projected_daily_cost
+            round((savings / projected_daily_cost) * 100, 2)
+            if projected_daily_cost > 0
             else 0.0
         )
+
+        # Protección adicional para el contrato y PostgreSQL.
+        savings_percentage = min(max(savings_percentage, 0.0), 100.0)
+
+        remaining_budget = max(remaining_budget - savings, 0.0)
+        total_savings += savings
+
         recommendations.append(
             {
                 "equipment": action.equipment,
@@ -87,7 +105,6 @@ def build_recommendation(
                 "savings_percentage": savings_percentage,
             }
         )
-
     report: dict[str, Any] = {
         "type": "optimization_report",
         "id_chamber": chamber_key,

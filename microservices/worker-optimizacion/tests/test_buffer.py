@@ -41,3 +41,72 @@ def test_missing_timestamp_is_not_invented_into_history():
     assert normalize_reading({"consumption_kwh": 5.0}) is None
     assert normalize_reading({"ts": " ", "kwh": 5.0}) is None
     assert normalize_reading({"timestamp": "no-es-fecha", "kwh": 5.0}) is None
+
+
+def test_normalize_reading_accepts_sensor_raw_consumption_kw():
+    reading = normalize_reading(
+        {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "id_chamber": "66666666-6666-6666-6666-666666666666",
+            "consumption_kw": 3.6,
+            "temperature": 2.5,
+        }
+    )
+
+    assert reading["consumption_kw"] == 3.6
+    assert reading["consumption_kwh"] is None
+    assert reading["id_chamber"] == "66666666-6666-6666-6666-666666666666"
+
+
+def test_buffer_integrates_consumption_kw_using_real_time_delta():
+    buf = ReadingsBuffer()
+    chamber = "66666666-6666-6666-6666-666666666666"
+
+    for ts in (
+        "2024-01-01T00:00:00Z",
+        "2024-01-01T00:00:10Z",
+        "2024-01-01T00:00:20Z",
+    ):
+        buf.add(
+            normalize_reading(
+                {
+                    "timestamp": ts,
+                    "id_chamber": chamber,
+                    "consumption_kw": 3.6,
+                }
+            )
+        )
+
+    df = buf.to_dataframe()
+
+    # Dos intervalos de 10 s a 3.6 kW = 0.02 kWh.
+    assert len(df) == 1
+    assert abs(df["y"].iloc[0] - 0.02) < 1e-9
+
+
+def test_buffer_caps_power_interval_at_five_minutes():
+    buf = ReadingsBuffer()
+    chamber = "66666666-6666-6666-6666-666666666666"
+    buf.add(
+        normalize_reading(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "id_chamber": chamber,
+                "consumption_kw": 3.6,
+            }
+        )
+    )
+    buf.add(
+        normalize_reading(
+            {
+                "timestamp": "2024-01-01T01:00:00Z",
+                "id_chamber": chamber,
+                "consumption_kw": 3.6,
+            }
+        )
+    )
+
+    df = buf.to_dataframe()
+
+    # 3.6 kW * 300 s / 3600 = 0.3 kWh; no se contabiliza una hora completa.
+    assert abs(df["y"].iloc[0] - 0.3) < 1e-9

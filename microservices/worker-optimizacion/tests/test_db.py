@@ -273,17 +273,20 @@ def test_save_saving_recommendations_without_rows_is_noop(monkeypatch):
 
 def test_save_report_accepts_optimization_reports_wire_fields(monkeypatch):
     chamber_id = "44444444-4444-4444-4444-444444444444"
-    saved_predictions = []
-    saved_recommendations = []
-    monkeypatch.setattr(
-        db,
-        "save_predicted_consumption",
-        lambda **kwargs: saved_predictions.append(kwargs) or True,
+
+    # Simula tres predicciones duplicadas existentes.
+    factory = _fake_get_connection(
+        [
+            (3,),
+            (2,),
+            (1,),
+        ]
     )
+
     monkeypatch.setattr(
         db,
-        "save_saving_recommendations",
-        lambda **kwargs: saved_recommendations.append(kwargs) or True,
+        "get_connection",
+        factory,
     )
 
     assert db.save_report(
@@ -293,23 +296,54 @@ def test_save_report_accepts_optimization_reports_wire_fields(monkeypatch):
             "predicted_kwh": 580.0,
             "price_kwh": 145.5,
             "id_price": 1,
-            "recommendations": [{"action": "apagar"}],
+            "recommendations": [
+                {
+                    "equipment": "camaras_2_y_3",
+                    "action": "apagar",
+                    "window": ["18:00", "22:00"],
+                    "hours": 2,
+                    "estimated_savings": 17.45,
+                    "savings_percentage": 100.0,
+                }
+            ],
         }
     ) is True
 
-    assert saved_predictions == [
-        {
-            "target_date": "2026-10-26",
-            "predicted_kwh": 580.0,
-            "id_chamber": chamber_id,
-        }
+    statements = factory.conn._cursor.executed
+
+    assert any(
+        "SELECT id_consumption_prediction" in sql
+        for sql, _ in statements
+    )
+
+    assert any(
+        "UPDATE predicted_consumption" in sql
+        for sql, _ in statements
+    )
+
+    assert any(
+        "DELETE FROM predicted_consumption" in sql
+        for sql, _ in statements
+    )
+
+    assert any(
+        "DELETE FROM saving_recommendation" in sql
+        for sql, _ in statements
+    )
+
+    inserts = [
+        (sql, params)
+        for sql, params in statements
+        if "INSERT INTO saving_recommendation" in sql
     ]
-    assert saved_recommendations == [
-        {
-            "target_date": "2026-10-26",
-            "price_clp_kwh": 145.5,
-            "recommendations": [{"action": "apagar"}],
-            "id_price": 1,
-            "id_chamber": chamber_id,
-        }
-    ]
+
+    assert len(inserts) == 1
+
+    _, rows = inserts[0]
+
+    assert rows[0][0] == chamber_id
+    assert rows[0][1] == 1
+    assert rows[0][2] == "apagar"
+    assert rows[0][3] == 100.0
+    assert rows[0][4] == 17.45
+    assert rows[0][6] == "pending"
