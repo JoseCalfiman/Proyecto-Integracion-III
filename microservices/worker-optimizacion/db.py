@@ -6,6 +6,7 @@ import os
 from contextlib import contextmanager
 from datetime import date
 from typing import Any, Iterator
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +17,22 @@ except ImportError:  # pragma: no cover - dependencia opcional
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "postgres")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASS = os.getenv("DB_PASS", "")
+DB_NAME = os.getenv("DB_NAME", "frigorifico")
+DB_USER = os.getenv("DB_USER", "admin")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "admin123")
 
-# Contexto de negocio requerido por el esquema (FK NOT NULL).
-CHAMBER_ID = int(os.getenv("OPTIMIZATION_CHAMBER_ID", "1"))
-COMPANY_ID = int(os.getenv("OPTIMIZATION_COMPANY_ID", "1"))
+# UUID de cámara de ejemplo, definido en database/seeds.sql.
+ID_CHAMBER = os.getenv(
+    "OPTIMIZATION_CHAMBER_ID", "44444444-4444-4444-4444-444444444444"
+)
+
+
+def _normalize_chamber_id(id_chamber: str | None = None) -> str:
+    """Valida y normaliza el UUID de cámara usado por las claves foráneas."""
+    try:
+        return str(UUID(id_chamber or ID_CHAMBER))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("id_chamber debe ser un UUID válido") from exc
 
 
 def _dsn_kwargs() -> dict[str, Any]:
@@ -31,7 +41,7 @@ def _dsn_kwargs() -> dict[str, Any]:
         "port": DB_PORT,
         "dbname": DB_NAME,
         "user": DB_USER,
-        "password": DB_PASS,
+        "password": DB_PASSWORD,
         "connect_timeout": 5,
     }
 
@@ -54,50 +64,106 @@ def get_connection() -> Iterator[Any]:
     try:
         yield conn
         conn.commit()
-    except Exception as exc:  # noqa: BLE001
+    except Exception:
         conn.rollback()
-        logger.warning("[db] error en transaccion: %s", exc)
+        raise
     finally:
         conn.close()
 
 
-def get_latest_price() -> float | None:
-    """Ultimo precio registrado en ``energy_price`` (CLP/kWh) o ``None``."""
+def validate_schema(id_chamber: str | None = None) -> bool:
+    """Comprueba la conexión y las columnas oficiales antes de optimizar.
+
+    Las consultas ``LIMIT 0`` validan las columnas usadas tanto en lectura como
+    en escritura sin modificar datos. También verifica que la cámara configurada
+    exista, para detectar un UUID que no corresponda a la BD activa.
+    """
+    try:
+        chamber_uuid = _normalize_chamber_id(id_chamber)
+        with get_connection() as conn:
+            if conn is None:
+                return False
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT timestamp, id_chamber, consumption_kw "
+                    "FROM sensor_data LIMIT 0"
+                )
+                cur.execute(
+                    "SELECT id_price, price_kwh, queried_at "
+                    "FROM energy_price LIMIT 0"
+                )
+                cur.execute(
+                    "SELECT id_chamber, prediction_date, predicted_consumption_kw "
+                    "FROM predicted_consumption LIMIT 0"
+                )
+                cur.execute(
+                    "SELECT id_recommendation, id_chamber, id_price, action, "
+                    "expected_saving_pct, expected_saving_amount, rationale, status "
+                    "FROM saving_recommendation LIMIT 0"
+                )
+                cur.execute(
+                    "SELECT 1 FROM chambers WHERE id_chamber = %s",
+                    (chamber_uuid,),
+                )
+                if cur.fetchone() is None:
+                    logger.error(
+                        "[db] el UUID %s no existe en chambers.id_chamber",
+                        chamber_uuid,
+                    )
+                    return False
+    except Exception as exc:  # noqa: BLE001 - informa schema/BD no compatibles
+        logger.error("[db] validación de esquema/conexión fallida: %s", exc)
+        return False
+    return True
+
+
+def get_latest_energy_price() -> dict[str, Any] | None:
+    """Ultimo ``id_price`` y ``price_kwh`` de ``energy_price`` por ``queried_at``."""
+    row = None
     with get_connection() as conn:
         if conn is None:
             return None
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT price_kwh FROM energy_price ORDER BY queried_at DESC LIMIT 1"
+                """
+                SELECT id_price, price_kwh
+                FROM energy_price
+                ORDER BY queried_at DESC
+                LIMIT 1
+                """
             )
             row = cur.fetchone()
-    return float(row[0]) if row else None
+    if not row:
+        return None
+    return {"id_price": int(row[0]), "price_kwh": float(row[1])}
+
+
+def get_latest_price() -> float | None:
+    """Ultimo ``price_kwh`` (CLP) de ``energy_price`` o ``None``."""
+    quote = get_latest_energy_price()
+    return quote["price_kwh"] if quote else None
 
 
 def get_latest_price_id() -> int | None:
-    with get_connection() as conn:
-        if conn is None:
-            return None
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT price_id FROM energy_price ORDER BY queried_at DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-    return int(row[0]) if row else None
+    """Ultimo ``id_price`` de ``energy_price`` o ``None``."""
+    quote = get_latest_energy_price()
+    return quote["id_price"] if quote else None
 
 
 def get_consumption_history(
     days: int = 7,
-    chamber_id: int | None = None,
+    id_chamber: str | None = None,
 ) -> list[dict[str, Any]]:
     """Consumo diario (kWh) de los ultimos ``days`` dias para una camara.
 
-    Agrega ``sensor_data`` por dia (``SUM(consumption_kw)``) filtrando por
-    ``chamber_id``. Devuelve una lista de ``{"date", "consumption_kwh"}`` o una
-    lista vacia si la BD no esta disponible.
+    Convierte cada lectura de potencia (kW) a energia (kWh) considerando un
+    intervalo de muestreo de 10 segundos y agrega los resultados por dia,
+    filtrando por ``id_chamber``. Devuelve una lista de
+    ``{"date", "consumption_kwh"}`` o una lista vacia si la BD no esta disponible.
     """
     if days <= 0:
         raise ValueError("days debe ser mayor o igual a 1")
+    chamber_uuid = _normalize_chamber_id(id_chamber)
 
     with get_connection() as conn:
         if conn is None:
@@ -105,15 +171,15 @@ def get_consumption_history(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT date_trunc('day', recorded_at) AS day,
-                       SUM(consumption_kw) AS total_kwh
+                SELECT date_trunc('day', timestamp) AS day,
+                       SUM(consumption_kw * 10.0 / 3600.0) AS total_kwh
                 FROM sensor_data
-                WHERE chamber_id = %s
-                  AND recorded_at >= NOW() - (%s * INTERVAL '1 day')
+                WHERE id_chamber = %s
+                  AND timestamp >= NOW() - (%s * INTERVAL '1 day')
                 GROUP BY day
                 ORDER BY day
                 """,
-                (chamber_id or CHAMBER_ID, days),
+                (chamber_uuid, days),
             )
             rows = cur.fetchall()
 
@@ -125,8 +191,9 @@ def get_consumption_history(
 def save_predicted_consumption(
     target_date: date | str,
     predicted_kwh: float,
-    chamber_id: int | None = None,
+    id_chamber: str | None = None,
 ) -> bool:
+    chamber_uuid = _normalize_chamber_id(id_chamber)
     with get_connection() as conn:
         if conn is None:
             return False
@@ -134,10 +201,10 @@ def save_predicted_consumption(
             cur.execute(
                 """
                 INSERT INTO predicted_consumption
-                    (chamber_id, prediction_date, predicted_consumption_kw)
+                    (id_chamber, prediction_date, predicted_consumption_kw)
                 VALUES (%s, %s, %s)
                 """,
-                (chamber_id or CHAMBER_ID, target_date, predicted_kwh),
+                (chamber_uuid, target_date, predicted_kwh),
             )
     return True
 
@@ -146,13 +213,13 @@ def save_saving_recommendations(
     target_date: date | str,
     price_clp_kwh: float,
     recommendations: list[dict[str, Any]],
-    price_id: int | None = None,
-    company_id: int | None = None,
-    chamber_id: int | None = None,
+    id_price: int | None = None,
+    id_chamber: str | None = None,
 ) -> bool:
     if not recommendations:
         return True
 
+    chamber_uuid = _normalize_chamber_id(id_chamber)
     rows = []
     for rec in recommendations:
         justification = json.dumps(
@@ -167,9 +234,8 @@ def save_saving_recommendations(
         )
         rows.append(
             (
-                company_id or COMPANY_ID,
-                chamber_id or CHAMBER_ID,
-                price_id,
+                chamber_uuid,
+                id_price,
                 rec.get("action"),
                 rec.get("savings_percentage"),
                 rec.get("estimated_savings", 0),
@@ -184,10 +250,10 @@ def save_saving_recommendations(
         with conn.cursor() as cur:
             cur.executemany(
                 """
-                INSERT INTO saving_recommendations
-                    (company_id, chamber_id, price_id, action, savings_percentage,
-                     amount_clp, justification, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO saving_recommendation
+                    (id_chamber, id_price, action, expected_saving_pct,
+                     expected_saving_amount, rationale, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 rows,
             )
@@ -196,21 +262,34 @@ def save_saving_recommendations(
 
 def save_report(report: dict[str, Any]) -> bool:
     """Persiste la prediccion de consumo y las recomendaciones de ahorro."""
-    target_date = report.get("target_date")
-    price = report.get("forecasted_kwh_cost") or report.get("price_clp_kwh") or 0.0
+    target_date = report.get("prediction_date") or report.get("target_date")
+    price = report.get("price_kwh")
+    if price is None:
+        price = report.get("forecasted_kwh_cost")
+    if price is None:
+        price = report.get("price_clp_kwh", 0.0)
+    id_chamber = report.get("id_chamber")
 
     ok = True
-    predicted_kwh = report.get("forecasted_kwh")
+    predicted_kwh = report.get("predicted_kwh")
+    if predicted_kwh is None:
+        predicted_kwh = report.get("forecasted_kwh")
     if predicted_kwh is not None:
         ok = save_predicted_consumption(
             target_date=target_date,
             predicted_kwh=predicted_kwh,
+            id_chamber=id_chamber,
         ) and ok
+
+    id_price = report.get("id_price")
+    if id_price is None:
+        id_price = get_latest_price_id()
 
     ok = save_saving_recommendations(
         target_date=target_date,
         price_clp_kwh=price,
         recommendations=report.get("recommendations", []),
-        price_id=get_latest_price_id(),
+        id_price=id_price,
+        id_chamber=id_chamber,
     ) and ok
     return ok

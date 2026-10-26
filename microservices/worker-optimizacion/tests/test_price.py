@@ -1,6 +1,11 @@
+import logging
 from pathlib import Path
 
 import price
+
+
+def setup_function():
+    price._last_quote = None
 
 
 def _write_csv(tmp_path: Path, rows: list[tuple[str, float]]) -> Path:
@@ -37,10 +42,48 @@ def test_get_current_price_uses_csv_when_db_unavailable(monkeypatch, tmp_path):
     assert price.get_current_price() == 152.4
 
 
-def test_get_current_price_falls_back_to_default(monkeypatch, tmp_path):
+def test_get_current_price_uses_latest_db_row(monkeypatch, tmp_path):
+    monkeypatch.setattr(price, "CSV_PATH", tmp_path / "no_existe.csv")
+    monkeypatch.setattr(
+        price,
+        "_price_from_db",
+        lambda: {"id_price": 9, "price_kwh": 148.2},
+    )
+
+    quote = price.get_current_quote()
+
+    assert quote == {"id_price": 9, "price_kwh": 148.2}
+    assert price.get_current_price() == 148.2
+
+
+def test_get_current_price_reuses_last_when_update_fails(monkeypatch, caplog):
+    state = {"n": 0}
+
+    def fake_db():
+        state["n"] += 1
+        if state["n"] == 1:
+            return {"id_price": 4, "price_kwh": 151.75}
+        return None
+
+    monkeypatch.setattr(price, "_price_from_db", fake_db)
+    monkeypatch.setattr(price, "CSV_PATH", Path("no_existe.csv"))
+
+    assert price.get_current_price() == 151.75
+    with caplog.at_level(logging.WARNING, logger="price"):
+        assert price.get_current_price() == 151.75
+
+    assert "reutiliza el ultimo precio" in caplog.text
+    assert price._last_quote["id_price"] == 4
+
+
+def test_get_current_price_without_source_returns_none(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(price, "_price_from_db", lambda: None)
     monkeypatch.setattr(price, "CSV_PATH", tmp_path / "no_existe.csv")
-    assert price.get_current_price() == price.DEFAULT_PRICE_CLP_KWH
+
+    with caplog.at_level(logging.WARNING, logger="price"):
+        assert price.get_current_price() is None
+
+    assert "no hay precio disponible" in caplog.text
 
 
 def test_bundled_precio_cne_csv_is_readable():

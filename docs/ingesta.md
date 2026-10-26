@@ -232,7 +232,7 @@ Para que el dashboard lo encuentre, el servicio debe llamarse `ingesta-service` 
 7. **Valores incompatibles con la BD:**
    - `worker-haccp` guarda severidades como `warning`, pero la tabla solo acepta `low`, `medium`, `high`, `critical`.
    - `worker-predictivo` guarda `risk_level` en mayúsculas (`CRITICO`, `ALTO`, etc.), que la tabla `predictions` también rechaza.
-8. **`worker-optimizacion/db.py` no coincide con `init.sql`.** Usa `saving_recommendations`, `chamber_id`, `recorded_at` y `price_id`, pero el esquema define `saving_recommendation`, `id_chamber`, `timestamp` e `id_price`. Mientras no se alinee, la métrica de ahorro quedará en 0.
+8. **`worker-optimizacion/db.py` alineado con `init.sql`.** Usa `DB_PASSWORD`, UUID para `id_chamber` y los nombres oficiales `sensor_data.timestamp`, `energy_price.id_price` y `saving_recommendation`.
 9. **`models.py` desactualizado:** `Sensor` no tiene `mcu_id`, `firmware` ni `last_calibration`.
 10. **Restricción de unicidad:** falta `UNIQUE (id_chamber)` en `haccp_rules` (el modelo de `worker-haccp` sí lo declara).
 11. **CORS:** `main.py` permite cualquier origen con credenciales. Conviene limitarlo a los orígenes reales antes de producción.

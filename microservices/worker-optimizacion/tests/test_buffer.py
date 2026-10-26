@@ -35,3 +35,9 @@ def test_buffer_ignores_readings_without_consumption():
     buf = ReadingsBuffer()
     buf.add(normalize_reading({"ts": "2024-01-01T10:00:00Z", "temperature": 3.0}))
     assert buf.to_dataframe().empty
+
+
+def test_missing_timestamp_is_not_invented_into_history():
+    assert normalize_reading({"consumption_kwh": 5.0}) is None
+    assert normalize_reading({"ts": " ", "kwh": 5.0}) is None
+    assert normalize_reading({"timestamp": "no-es-fecha", "kwh": 5.0}) is None

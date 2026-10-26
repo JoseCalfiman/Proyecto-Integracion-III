@@ -5,6 +5,7 @@ import signal
 import threading
 
 from buffer import get_buffer
+from health import health, start_health_server
 from kafka_consumer import build_consumer, consume
 from scheduler import build_scheduler
 
@@ -31,6 +32,12 @@ def main() -> None:
     scheduler.start()
     logger.info("[main] scheduler iniciado")
 
+    health.configure(
+        consumer_alive=consumer_thread.is_alive,
+        scheduler_running=lambda: scheduler.running,
+    )
+    health_server = start_health_server()
+
     def handle_shutdown(signum, frame):
         stop_event.set()
 
@@ -43,6 +50,8 @@ def main() -> None:
     except (KeyboardInterrupt, SystemExit):
         stop_event.set()
     finally:
+        health_server.shutdown()
+        health_server.server_close()
         scheduler.shutdown(wait=False)
         consumer.close()
         logger.info("[main] worker-optimizacion detenido")
