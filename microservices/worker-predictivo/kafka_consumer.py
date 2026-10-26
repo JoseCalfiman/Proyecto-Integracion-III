@@ -128,8 +128,9 @@ class PredictiveKafkaWorker:
                 else None
             )
 
+            prediction_id = None
             try:
-                guardar_prediccion(
+                prediccion_obj = guardar_prediccion(
                     session,
                     chamber_id=id_chamber,
                     calculated_slope=resultado["pendiente_por_minuto"],
@@ -137,12 +138,14 @@ class PredictiveKafkaWorker:
                     remaining_time_min=resultado["tiempo_restante_min"],
                     risk_level=mapear_risk_level(resultado["nivel_riesgo"]),
                 )
+                prediction_id = prediccion_obj.id_prediction
             except Exception:
                 logging.exception(f"No se pudo guardar la predicción para {id_chamber}")
                 session.rollback()
 
         if resultado["hay_riesgo"]:
             alert_payload = {
+                "id_prediction": prediction_id,
                 "id_chamber": id_chamber,
                 "remaining_time_min": resultado["tiempo_restante_min"],
                 "temperature": temperature,
