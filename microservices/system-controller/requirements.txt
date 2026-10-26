@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+httpx
+kubernetes
+confluent-kafka
+paho-mqtt
+psycopg2-binary

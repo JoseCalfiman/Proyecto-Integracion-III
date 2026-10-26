@@ -1,11 +1,96 @@
 from types import SimpleNamespace
 
+import pytest
+
 from haccp_validator import (
     DEFAULT_HACCP_RULE,
+    HaccpRuleConfigurationError,
+    evaluate_predictive_event,
     evaluate_temperature_rule,
     evaluate_temperature_series,
     validar_haccp,
 )
+
+
+PREDICTIVE_EVENT = {"temperature": 2.0, "remaining_time_min": 20.0}
+ACTIVE_RULE = {
+    "min_absolute_temp": -20.0,
+    "max_absolute_temp": 5.0,
+    "tolerance_time_min": 15,
+}
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_violation"),
+    [
+        ({"temperature": -20.1, "remaining_time_min": 20}, "temperature_below_minimum"),
+        ({"temperature": 5.1, "remaining_time_min": 20}, "temperature_above_maximum"),
+        ({"temperature": -20, "remaining_time_min": 20}, None),
+        ({"temperature": 5, "remaining_time_min": 20}, None),
+        ({"temperature": 2, "remaining_time_min": 14}, "remaining_time_within_tolerance"),
+        ({"temperature": 2, "remaining_time_min": 15}, "remaining_time_within_tolerance"),
+        ({"temperature": 2, "remaining_time_min": 16}, None),
+        ({"temperature": 2, "remaining_time_min": 20}, None),
+    ],
+)
+def test_predictive_event_decision_boundaries(payload, expected_violation):
+    result = evaluate_predictive_event(payload, ACTIVE_RULE)
+
+    assert result["is_alert"] is (expected_violation is not None)
+    if expected_violation:
+        assert result["violations"] == [expected_violation]
+    else:
+        assert result["violations"] == []
+
+
+def test_predictive_event_combines_simultaneous_violations_once():
+    result = evaluate_predictive_event(
+        {"temperature": 6, "remaining_time_min": 10},
+        ACTIVE_RULE,
+    )
+
+    assert result["is_alert"] is True
+    assert result["violations"] == [
+        "temperature_above_maximum",
+        "remaining_time_within_tolerance",
+    ]
+
+
+@pytest.mark.parametrize(
+    "rule_overrides",
+    [
+        {"min_absolute_temp": None},
+        {"max_absolute_temp": None},
+        {"tolerance_time_min": None},
+        {"min_absolute_temp": float("-inf")},
+        {"max_absolute_temp": float("nan")},
+        {"max_absolute_temp": float("inf")},
+        {"tolerance_time_min": float("nan")},
+        {"tolerance_time_min": -1},
+        {"min_absolute_temp": 6, "max_absolute_temp": 5},
+        {"max_absolute_temp": "5"},
+        {"tolerance_time_min": True},
+    ],
+)
+def test_predictive_event_rejects_invalid_active_rule(rule_overrides):
+    rule = {**ACTIVE_RULE, **rule_overrides}
+
+    with pytest.raises(HaccpRuleConfigurationError):
+        evaluate_predictive_event(PREDICTIVE_EVENT, rule)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"temperature": float("nan"), "remaining_time_min": 1},
+        {"temperature": 1, "remaining_time_min": float("inf")},
+        {"temperature": True, "remaining_time_min": 1},
+        {"temperature": 1, "remaining_time_min": -1},
+    ],
+)
+def test_predictive_event_rejects_non_numeric_or_non_finite_values(payload):
+    with pytest.raises(ValueError):
+        evaluate_predictive_event(payload, ACTIVE_RULE)
 
 
 def test_single_temperature_below_threshold_is_ok():

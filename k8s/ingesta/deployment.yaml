@@ -18,13 +18,34 @@ spec:
         image: aamonsalve/cryometric-ingesta:latest
         ports:
         - containerPort: 8000
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          timeoutSeconds: 8
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
         envFrom:
         - configMapRef:
             name: app-config
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "50m"
+            cpu: "25m"
+            memory: "64Mi"
           limits:
-            memory: "256Mi"
             cpu: "100m"
+            memory: "160Mi"
