@@ -118,6 +118,7 @@ Los modelos de `models.py` siguen el esquema de `database/init.sql`.
 | Método | Ruta | Descripción | Permiso previsto |
 |---|---|---|---|
 | GET | `/health` | Estado del servicio (sin prefijo `/api/v1`) | Público |
+| GET | `/ready` | Disponibilidad de DB (`SELECT 1`) y Kafka (metadatos del broker); HTTP 200 si ambas responden, 503 en caso contrario | Público |
 | GET | `/chambers` | Lista cámaras activas (`?include_inactive=true` incluye las desactivadas) | Técnico, gerente |
 | GET | `/chambers/{id_chamber}` | Detalle de una cámara | Técnico, gerente |
 | POST | `/chambers` | Crea una cámara | Gerente |
@@ -134,6 +135,25 @@ Los modelos de `models.py` siguen el esquema de `database/init.sql`.
 | GET | `/dashboard/live` | Métricas en vivo para las tarjetas del dashboard | Técnico, gerente |
 
 ### 7.1 Convenciones
+
+Las probes de `k8s/ingesta/deployment.yaml` usan `/health` para startup y
+liveness, y `/ready` para readiness. Startup permite hasta 150 segundos de
+arranque. Readiness consulta las dependencias cada 10 segundos con un timeout
+HTTP de 8 segundos; DB limita conexión y consulta a 2 segundos cada una y Kafka
+limita la consulta de metadatos a 2 segundos. La respuesta muestra `checks.db`
+y `checks.kafka` como `ok` o `error`, sin exponer detalles de conexión.
+Una dependencia caída retira el Pod del tráfico tras tres fallos consecutivos;
+cuando ambas se recuperan, la siguiente probe correcta lo vuelve a marcar Ready.
+
+Después de construir y publicar la imagen actualizada, aplicar el Deployment y
+comprobarlo en el clúster:
+
+```bash
+kubectl apply -f k8s/ingesta/deployment.yaml
+kubectl rollout restart deployment/ingesta -n student-aamonsalve
+kubectl rollout status deployment/ingesta -n student-aamonsalve --timeout=180s
+kubectl get pods -n student-aamonsalve -l app=ingesta
+```
 
 - Los campos de la API usan los nombres en inglés de la base de datos (`id_chamber`, `max_absolute_temp`, etc.).
 - Los identificadores de cámara, usuario y empresa son UUID. El de alerta es numérico.
