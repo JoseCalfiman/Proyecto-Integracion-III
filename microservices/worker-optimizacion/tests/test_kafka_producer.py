@@ -53,6 +53,16 @@ def test_build_recommendation_includes_savings_percentage():
         assert rec["savings_percentage"] == expected
 
 
+def test_build_recommendation_caps_savings_at_projected_daily_cost():
+    report = _build_report(predicted_kwh=0.11993546533896922, price_kwh=145.5)
+
+    assert report["estimated_savings"] == report["projected_daily_cost"]
+    assert report["recommendations"][0]["estimated_savings"] == report["projected_daily_cost"]
+    assert report["recommendations"][0]["savings_percentage"] == 100.0
+    assert report["recommendations"][1]["estimated_savings"] == 0.0
+    assert report["recommendations"][1]["savings_percentage"] == 0.0
+
+
 class FakeMessage:
     @staticmethod
     def topic():

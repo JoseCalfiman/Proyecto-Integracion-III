@@ -112,6 +112,35 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
     assert health.snapshot()["last_optimization_at"] is not None
 
 
+def test_run_optimization_does_not_publish_when_persistence_fails(monkeypatch, caplog):
+    published = []
+    health.reset()
+    monkeypatch.setattr(sched.db, "validate_schema", lambda: True)
+    monkeypatch.setattr(
+        sched.db,
+        "get_consumption_history",
+        lambda days: [
+            {"date": date(2024, 1, 7), "consumption_kwh": 130.0},
+        ],
+    )
+    monkeypatch.setattr(
+        sched, "forecast_daily_consumption", lambda df, horizon: _fake_forecast()
+    )
+    monkeypatch.setattr(
+        sched, "get_current_quote", lambda: {"id_price": 7, "price_kwh": 145.0}
+    )
+    monkeypatch.setattr(sched.db, "save_report", lambda report: False)
+    monkeypatch.setattr(sched, "publish_report", lambda report: published.append(report))
+
+    with caplog.at_level(logging.ERROR):
+        result = sched.run_optimization()
+
+    assert result is None
+    assert published == []
+    assert health.snapshot()["last_optimization_at"] is None
+    assert "no se pudo persistir el reporte" in caplog.text
+
+
 def test_run_optimization_skips_without_data(monkeypatch):
     published = []
     health.reset()

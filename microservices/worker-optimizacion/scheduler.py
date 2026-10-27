@@ -82,8 +82,16 @@ def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
         id_price=int(id_price) if id_price is not None else None,
     )
 
-    # Primero persistir, luego publicar.
-    db.save_report(report)
+    # Primero persistir, luego publicar. La base de datos es la fuente que
+    # consumen la API y el dashboard; no publicar un reporte que no quedó guardado.
+    if not db.save_report(report):
+        logger.error(
+            "[scheduler] no se pudo persistir el reporte para %s; "
+            "se omite la publicación",
+            prediction_date,
+        )
+        return None
+
     publish_report(report)
     health.mark_optimization()
     logger.info("[scheduler] reporte publicado para %s", prediction_date)

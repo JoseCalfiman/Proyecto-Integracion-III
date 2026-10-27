@@ -70,7 +70,12 @@ def build_recommendation(
 
     for action in ACTIONS:
         potencia_kw = EQUIPMENT_POWER_KW[action.equipment]
-        savings = calcular_ahorro_action(action, potencia_kw, price_kwh)
+        potential_savings = calcular_ahorro_action(action, potencia_kw, price_kwh)
+        # Recommendations cannot save more than the projected daily energy cost.
+        # Besides keeping the report meaningful, this keeps percentages within
+        # the range accepted by saving_recommendation.expected_saving_pct.
+        remaining_cost = max(projected_daily_cost - total_savings, 0.0)
+        savings = min(potential_savings, remaining_cost)
         total_savings += savings
         savings_percentage = (
             round(savings / projected_daily_cost * 100, 2)
