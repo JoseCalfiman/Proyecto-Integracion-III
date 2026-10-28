@@ -44,6 +44,9 @@ def _deep(timeout: float, host: str, port: int) -> Tuple[bool, str]:
 
 
 async def check() -> CheckResult:
-    host = os.getenv("MQTT_BROKER_HOST", "mosquitto-service")
+    host = os.getenv("MQTT_BROKER_HOST")
+    if not host:
+        return False, "MQTT_BROKER_HOST no configurado"
+    
     port = int(os.getenv("MQTT_BROKER_PORT", "1883"))
     return await layered_check(host, port, timeout=3.0, deep=lambda t: _deep(t, host, port))

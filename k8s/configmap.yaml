@@ -4,7 +4,7 @@ metadata:
   name: app-config
   namespace: student-aamonsalve
 data:
-  MQTT_BROKER_HOST: "test.mosquitto.org"
+  MQTT_BROKER_HOST: "broker.emqx.io"
   MQTT_BROKER_PORT: "1883"
   KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
 
