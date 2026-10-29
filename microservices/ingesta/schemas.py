@@ -35,6 +35,18 @@ class DashboardLive(BaseModel):
     estimated_savings_clp: float
 
 
+class SavingRecommendationRead(BaseModel):
+    id: int
+    titulo: str
+    descripcion: str
+    prioridad: str
+    porcentaje_ahorro: float
+    monto_clp: float
+    icono: str
+    status: str
+    created_at: Optional[datetime] = None
+
+
 class SensorDataRead(SensorDataCreate):
     """Lectura tal como se devuelve desde la base de datos."""
 

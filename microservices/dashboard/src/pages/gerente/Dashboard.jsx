@@ -104,7 +104,7 @@ const Dashboard = () => {
         <MetricCard
           title="Consumo Total"
           value={loading ? "..." : datos.total_consumption_kw?.toFixed(2)}
-          unit="kW"r
+          unit="kW"
           icon={Zap}
           color="yellow"
         />

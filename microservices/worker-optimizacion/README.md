@@ -137,3 +137,44 @@ Tests:
 ```bash
 python -m pytest
 ```
+
+## Demostración E2E local
+
+Desde la raíz del repositorio, levanta los servicios implicados:
+
+```bash
+docker compose up -d --build timescaledb kafka kafka-init ingesta worker-optimizacion dashboard
+```
+
+En una terminal, deja un consumidor esperando el siguiente evento (no uses
+`--from-beginning`, para observar el reporte recién generado):
+
+```bash
+docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic optimization.reports \
+  --max-messages 1
+```
+
+En otra terminal, dispara una optimización inmediata en el contenedor del worker:
+
+```bash
+docker compose exec worker-optimizacion python -c "import scheduler; scheduler.run_optimization()"
+```
+
+La salida del consumidor debe incluir `type: optimization_report`, la predicción,
+`price_kwh`, el total de `estimated_savings` y la lista de `recommendations`.
+Comprueba además la escritura en las tablas y las respuestas HTTP:
+
+```bash
+docker compose exec timescaledb sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT prediction_date, predicted_consumption_kw FROM predicted_consumption ORDER BY generation_date DESC LIMIT 1"'
+docker compose exec timescaledb sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT action, expected_saving_pct, expected_saving_amount AS ahorro_clp, rationale, status FROM saving_recommendation ORDER BY created_at DESC, id_recommendation DESC LIMIT 5"'
+curl http://localhost:8001/api/v1/dashboard/live
+curl http://localhost:8001/api/v1/optimizacion/recomendaciones
+```
+
+La API de recomendaciones entrega los registros pendientes de la optimización más
+reciente. Para comprobar la presentación, inicia sesión como gerente en
+`http://localhost:8501/ahorro`: el total y cada tarjeta de recomendación deben
+coincidir con los montos CLP devueltos por la API. El dashboard general muestra
+el mismo total en la tarjeta “Ahorro Estimado”.

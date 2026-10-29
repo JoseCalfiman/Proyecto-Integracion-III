@@ -161,10 +161,10 @@ const Ahorro = () => {
               </p>
             </div>
             <p className="text-4xl font-bold text-green-600">
-              {formatCLP(totalAhorro || 150000)}
+              {formatCLP(totalAhorro)}
             </p>
             <p className="text-xs text-gray-500 mt-2">
-              Ahorro proyectado a 30 días basado en IA.
+              Suma del ahorro de la optimización más reciente.
             </p>
           </div>
           <div className="mt-6 inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-3 py-1 rounded-lg self-start">

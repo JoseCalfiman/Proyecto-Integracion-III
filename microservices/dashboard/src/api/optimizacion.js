@@ -6,7 +6,7 @@ import apiClient from './client';
 
 export const getRecomendacionesAhorro = async () => {
   try {
-    const response = await apiClient.get('/optimizacion/recomendations');
+    const response = await apiClient.get('/optimizacion/recomendaciones');
     return response.data;
   } catch (error) {
     throw new Error(

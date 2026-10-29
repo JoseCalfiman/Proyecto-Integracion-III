@@ -1,4 +1,5 @@
 import logging
+import json
 from datetime import date, datetime
 
 import pandas as pd
@@ -8,6 +9,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 import scheduler as sched
 from buffer import ReadingsBuffer, normalize_reading
 from health import health
+from kafka_producer import publish_report
 
 
 def test_build_scheduler_returns_background_scheduler():
@@ -110,6 +112,118 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
     assert [name for name, _ in calls] == ["save", "publish"]
     assert calls[0][1] is report and calls[1][1] is report
     assert health.snapshot()["last_optimization_at"] is not None
+
+
+def test_optimization_pipeline_persists_clp_recommendations_before_kafka(monkeypatch):
+    statements = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            statements.append((sql, params))
+
+        def executemany(self, sql, params=None):
+            statements.append((sql, params))
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeMessage:
+        @staticmethod
+        def topic():
+            return "optimization.reports"
+
+        @staticmethod
+        def partition():
+            return 0
+
+        @staticmethod
+        def offset():
+            return 12
+
+    class Producer:
+        def produce(self, topic, *, key, value, callback):
+            self.topic = topic
+            self.key = key
+            self.value = value
+            self.callback = callback
+
+        def poll(self, timeout):
+            pass
+
+        def flush(self, timeout):
+            self.callback(None, FakeMessage())
+            return 0
+
+    producer = Producer()
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake_connection():
+        yield Connection()
+
+    monkeypatch.setattr(sched.db, "validate_schema", lambda: True)
+    monkeypatch.setattr(
+        sched.db,
+        "get_consumption_history",
+        lambda days: [
+            {"date": date(2024, 1, 6), "consumption_kwh": 120.0},
+            {"date": date(2024, 1, 7), "consumption_kwh": 130.0},
+        ],
+    )
+    monkeypatch.setattr(
+        sched, "forecast_daily_consumption", lambda df, horizon: _fake_forecast()
+    )
+    monkeypatch.setattr(
+        sched, "get_current_quote", lambda: {"id_price": 7, "price_kwh": 145.0}
+    )
+    monkeypatch.setattr(sched.db, "get_connection", fake_connection)
+
+    def publish_after_persist(report):
+        inserts = [sql for sql, _ in statements if "INSERT INTO" in sql]
+        assert any("INSERT INTO predicted_consumption" in sql for sql in inserts)
+        assert any("INSERT INTO saving_recommendation" in sql for sql in inserts)
+        return publish_report(report, producer=producer)
+
+    monkeypatch.setattr(sched, "publish_report", publish_after_persist)
+    health.reset()
+
+    report = sched.run_optimization()
+
+    assert report is not None
+    assert producer.topic == "optimization.reports"
+    assert producer.key == report["id_chamber"].encode("utf-8")
+    event = json.loads(producer.value.decode("utf-8"))
+    assert event["prediction_date"] == "2024-01-08"
+    assert event["predicted_kwh"] == 580.0
+    assert event["price_kwh"] == 145.0
+    assert event["estimated_savings"] == 2465.0
+    assert [rec["estimated_savings"] for rec in event["recommendations"]] == [
+        1450.0,
+        1015.0,
+    ]
+    recommendation_insert = next(
+        params
+        for sql, params in statements
+        if "INSERT INTO saving_recommendation" in sql
+    )
+    assert all(row[4] >= 0 for row in recommendation_insert)
 
 
 def test_run_optimization_does_not_publish_when_persistence_fails(monkeypatch, caplog):
