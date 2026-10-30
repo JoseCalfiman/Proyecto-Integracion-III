@@ -110,17 +110,24 @@ def evaluar_riesgo(
     }
 
 
-# Bloque de prueba (ejecutar directamente para validar)
 if __name__ == "__main__":
-    ejemplo_timestamps = [0, 60, 120, 180, 240, 300]
-    ejemplo_temperaturas = [-18.0, -17.5, -17.0, -16.6, -16.1, -15.5]
+    timestamps_test = [0, 60, 120, 180] # segundos
+    temps_test = [20.0, 21.0, 22.0, 23.0]
 
-    pendiente = calcular_pendiente(ejemplo_timestamps, ejemplo_temperaturas)
-    print(f"Pendiente: {pendiente:.3f} °C/min")
+    pendiente_val = calcular_pendiente(timestamps_test, temps_test)
+    print(f"Pendiente calculada: {pendiente_val:.2f} °C/min (Esperada: 1.0)")
+    assert abs(pendiente_val - 1.0) < 1e-5, "Error en el cálculo de la pendiente"
 
-    tiempo_restante = estimar_tiempo_restante(
-        temperatura_actual=ejemplo_temperaturas[-1],
-        absolute_max_temp=-10.0,
-        pendiente_por_minuto=pendiente,
+    limite_haccp = 28.0
+    tiempo_val = estimar_tiempo_restante(
+        temperatura_actual=temps_test[-1],
+        absolute_max_temp=limite_haccp,
+        pendiente_por_minuto=pendiente_val,
     )
-    print(f"Tiempo restante estimado: {tiempo_restante:.1f} min")
+    print(f"Tiempo restante estimado: {tiempo_val:.1f} min (Esperado: 5.0)")
+    assert abs(tiempo_val - 5.0) < 1e-5, "Error en el cálculo del tiempo restante"
+
+    riesgo_val = determinar_nivel_riesgo(tiempo_val, umbral_alerta_minutos=40.0)
+    print(f"Nivel de riesgo determinado: {riesgo_val}")
+    
+    print("Validación de regresión y tiempo restante superada con éxito")
