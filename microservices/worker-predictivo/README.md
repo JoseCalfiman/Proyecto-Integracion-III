@@ -32,6 +32,10 @@ sensor.anomaly ◄── (si hay riesgo) ◄── predictor ──► predictio
 
 ## Niveles de riesgo
 
+Se realizó la partición en 3 del tópico sensor.raw
+
+## Niveles de riesgo
+
 El nivel se calcula según el tiempo restante frente al umbral de alerta
 (`tolerance_time_min` de la regla, o 40 min por defecto):
 
