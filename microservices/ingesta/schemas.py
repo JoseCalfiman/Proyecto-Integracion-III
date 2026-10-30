@@ -35,6 +35,16 @@ class DashboardLive(BaseModel):
     estimated_savings_clp: float
 
 
+class HistoricalMeasurement(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_data: int
+    id_chamber: UUID
+    timestamp: datetime
+    temperature: Optional[float] = None
+    consumption_kw: Optional[float] = None
+
+
 class SensorDataRead(SensorDataCreate):
     """Lectura tal como se devuelve desde la base de datos."""
 
