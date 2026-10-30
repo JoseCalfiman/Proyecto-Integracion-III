@@ -8,3 +8,4 @@ pydantic==2.9.0
 python-dotenv==1.0.1
 pyjwt==2.9.0
 passlib[bcrypt]==1.7.4
+google-genai==2.34.0

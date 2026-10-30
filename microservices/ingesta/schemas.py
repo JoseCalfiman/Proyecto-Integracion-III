@@ -141,3 +141,42 @@ class HaccpRuleRead(BaseModel):
     active: bool
     review_date: Optional[datetime] = None
     id_user_modified: Optional[UUID] = None
+
+class GeminiChatRequest(BaseModel):
+    pregunta: str = Field(
+        min_length=1,
+        max_length=2000,
+    )
+
+    camara_id: UUID
+
+    @field_validator("pregunta")
+    @classmethod
+    def pregunta_no_vacia(
+        cls,
+        value: str,
+    ) -> str:
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "pregunta no puede estar vacía"
+            )
+
+        return value
+
+
+
+class GeminiChatResponse(BaseModel):
+    respuesta: str
+
+    camara_id: UUID
+
+    modelo: str
+
+    periodo_horas: int
+
+    mediciones_consideradas: int
+
+    alertas_consideradas: int
