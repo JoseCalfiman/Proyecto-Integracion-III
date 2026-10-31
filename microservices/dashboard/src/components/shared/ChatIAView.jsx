@@ -38,6 +38,7 @@ const SUGERENCIAS_RAPIDAS = [
 const ChatIAView = () => {
   const [camaras, setCamaras] = useState([]);
   const [camaraId, setCamaraId] = useState('');
+  const [conversacionId, setConversacionId] = useState(null);
 
   const [mensajes, setMensajes] = useState([
     {
@@ -142,9 +143,16 @@ const ChatIAView = () => {
 
     try {
       const respuesta = await preguntarIA(
-        preguntaActual,
-        camaraId
-      );
+          preguntaActual,
+          camaraId,
+          conversacionId
+          );
+
+          if (respuesta?.id_conversation) {
+            setConversacionId(
+              respuesta.id_conversation
+            );
+          }
 
       setIaCaida(false);
 
@@ -325,9 +333,10 @@ const ChatIAView = () => {
 
               <select
                 value={camaraId}
-                onChange={(e) =>
-                  setCamaraId(e.target.value)
-                }
+                onChange={(e) => {
+                  setCamaraId(e.target.value);
+                  setConversacionId(null);
+                }}
                 disabled={
                   enviando ||
                   camaras.length === 0
