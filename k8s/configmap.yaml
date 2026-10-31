@@ -24,3 +24,7 @@ data:
   POSTGRES_USER: "admin"
   POSTGRES_PASSWORD: "admin123"
   POSTGRES_DB: "frigorifico"
+
+GEMINI_MODEL: "gemini-3.5-flash-lite"
+GEMINI_TIMEOUT_MS: "15000"
+GEMINI_MAX_ATTEMPTS: "3"

@@ -4,9 +4,7 @@ import os
 from google import genai
 from google.genai import types
 
-
 logger = logging.getLogger(__name__)
-
 
 GEMINI_MODEL = os.getenv(
     "GEMINI_MODEL",
@@ -14,8 +12,17 @@ GEMINI_MODEL = os.getenv(
 )
 
 
+GEMINI_TIMEOUT_MS = int(
+    os.getenv("GEMINI_TIMEOUT_MS", "8000")
+)
+
+GEMINI_MAX_ATTEMPTS = int(
+    os.getenv("GEMINI_MAX_ATTEMPTS", "1")
+)
+
+
 class GeminiConfigurationError(RuntimeError):
-    """La integración Gemini no está configurada correctamente."""
+    """Gemini no está configurado correctamente."""
 
 
 class GeminiServiceError(RuntimeError):
@@ -35,6 +42,12 @@ def _get_client() -> genai.Client:
 
     return genai.Client(
         api_key=api_key,
+        http_options=types.HttpOptions(
+            timeout=GEMINI_TIMEOUT_MS,
+            retry_options=types.HttpRetryOptions(
+                attempts=GEMINI_MAX_ATTEMPTS,
+            ),
+        ),
     )
 
 
@@ -43,9 +56,6 @@ def generar_respuesta(
     *,
     system_instruction: str | None = None,
 ) -> str:
-    """
-    Genera una respuesta de texto utilizando Gemini.
-    """
 
     if not prompt or not prompt.strip():
         raise ValueError(
@@ -60,22 +70,22 @@ def generar_respuesta(
             contents=prompt.strip(),
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                temperature=0.2,
             ),
         )
 
     except Exception as exc:
-        logger.exception(
-            "Error llamando a Gemini"
+        # No imprimimos el mensaje completo de la excepción
+        # para evitar filtrar credenciales en logs.
+        logger.error(
+            "Error Gemini: %s",
+            type(exc).__name__,
         )
 
         raise GeminiServiceError(
             "Gemini no respondió correctamente"
         ) from exc
 
-    text = (
-        response.text or ""
-    ).strip()
+    text = (response.text or "").strip()
 
     if not text:
         raise GeminiServiceError(
