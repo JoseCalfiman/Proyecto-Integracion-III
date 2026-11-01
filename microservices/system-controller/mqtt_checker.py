@@ -9,8 +9,12 @@ from health_checker import CheckResult, layered_check
 
 
 def _deep(timeout: float, host: str, port: int) -> Tuple[bool, str]:
-    user = os.getenv("MQTT_CONTROLLER_USER")
-    password = os.getenv("MQTT_CONTROLLER_PASSWORD")
+    user = os.getenv("MQTT_CONTROLLER_USER") or os.getenv("MQTT_USER")
+    password = (
+        os.getenv("MQTT_CONTROLLER_PASSWORD")
+        if os.getenv("MQTT_CONTROLLER_USER")
+        else os.getenv("MQTT_PASSWORD")
+    )
     if not user or not password:
         return False, "Credenciales MQTT del Controller no configuradas"
 

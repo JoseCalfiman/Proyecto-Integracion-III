@@ -129,3 +129,5 @@ sqlalchemy==2.0.30
 psycopg2-binary==2.9.9
 python-dotenv==1.0.1
 ```
+
+Para pruebas locales, instala `requirements-dev.txt` y ejecuta `python -m pytest`.

@@ -1,9 +1,11 @@
 import os
+import threading
+from typing import Callable
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.engine import URL
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.engine import Engine, URL
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 load_dotenv()
 
@@ -17,9 +19,25 @@ DATABASE_URL = os.getenv("DATABASE_URL") or URL.create(
     database=os.getenv("PGDATABASE") or os.getenv("POSTGRES_DB"),
 )
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine: Engine | None = None
+_session_factory: Callable[[], Session] | None = None
+_engine_lock = threading.Lock()
 Base = declarative_base()
+
+
+def SessionLocal() -> Session:
+    """Crea sesiones a partir de un único engine, inicializado bajo demanda."""
+    global engine, _session_factory
+    if _session_factory is None:
+        with _engine_lock:
+            if _session_factory is None:
+                engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+                _session_factory = sessionmaker(
+                    autocommit=False,
+                    autoflush=False,
+                    bind=engine,
+                )
+    return _session_factory()
 
 
 def get_db():

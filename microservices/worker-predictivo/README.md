@@ -1,19 +1,26 @@
-Responsable: Matias Carcamo
+# Worker predictivo
 
-Worker en Celery que cada 60 segundos lee el histórico reciente de temperatura desde TimescaleDB, calcula la pendiente con regresión lineal (scikit-learn) y estima el tiempo restante antes de una falla. Si el tiempo restante es ≤ 40 minutos, dispara una alerta.
+Consume lecturas de temperatura de `sensor.raw`, mantiene una ventana por cámara
+y estima con regresión lineal NumPy el tiempo hasta alcanzar el límite HACCP. Cada
+predicción se guarda en TimescaleDB; si alcanza el umbral configurado, publica una
+alerta en `sensor.anomaly`.
 
+## Componentes
 
+| Archivo | Función |
+|---|---|
+| `kafka_consumer.py` | Consume lecturas y coordina el flujo predictivo |
+| `contract.py` | Valida y normaliza el contrato de los mensajes |
+| `window.py` | Conserva lecturas recientes, ordenadas por cámara |
+| `predictor.py` | Calcula pendiente, tiempo restante y nivel de riesgo |
+| `haccp_predictions.py` | Consulta reglas y guarda predicciones |
+| `db.py` / `models.py` | Sesiones y modelos de TimescaleDB |
+| `config.py` | Configuración de Kafka, ventanas y umbrales |
 
-├── worker-predictivo/             # Worker Predictivo (Matías)
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   ├── main.py                    # Lógica principal (consumer Kafka)
-│   │   ├── config.py                  # Configuración desde .env
-│   │   ├── models.py                  # Modelos SQLAlchemy
-│   │   ├── predictor.py               # Lógica de regresión lineal (scikit-learn)
-│   │   ├── kafka_consumer.py          # Consumidor de Kafka
-│   │   ├── crud.py                    # Operaciones CRUD en base de datos
-│   │   ├── tests/
-│   │   │   ├── test_predictor.py
-│   │   │   └── test_kafka.py
-│   │   └── __init__.py
+## Pruebas
+
+Desde este directorio:
+
+```bash
+python -m pytest
+```

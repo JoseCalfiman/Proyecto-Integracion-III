@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional, Union
-from sklearn.linear_model import LinearRegression
+
 import numpy as np
 
 TimestampLike = Union[datetime, float, int]
@@ -28,17 +28,19 @@ def calcular_pendiente(
     if len(temperaturas) < 2:
         return None
 
-    segundos = _timestamps_a_segundos(timestamps)
-    X = segundos.reshape(-1, 1)
-    y = np.array(temperaturas, dtype=float)
+    seconds = _timestamps_a_segundos(timestamps)
+    values = np.asarray(temperaturas, dtype=float)
+    if not np.isfinite(seconds).all() or not np.isfinite(values).all():
+        return None
 
-    modelo = LinearRegression()
-    modelo.fit(X, y)
+    centered_seconds = seconds - seconds.mean()
+    variance = np.dot(centered_seconds, centered_seconds)
+    if variance == 0:
+        return 0.0
 
-    pendiente_por_segundo = modelo.coef_[0]
-    pendiente_por_minuto = pendiente_por_segundo * 60.0
-
-    return float(pendiente_por_minuto)
+    centered_values = values - values.mean()
+    slope_per_second = np.dot(centered_seconds, centered_values) / variance
+    return float(slope_per_second * 60.0)
 
 def estimar_tiempo_restante(
     temperatura_actual: float,

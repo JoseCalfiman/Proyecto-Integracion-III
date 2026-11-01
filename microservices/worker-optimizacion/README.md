@@ -125,6 +125,13 @@ pip install -r requirements.txt
 python main.py
 ```
 
+Para ejecutar las pruebas, instala las dependencias de desarrollo:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
 Docker (desde `microservices/worker-optimizacion`):
 
 ```bash
@@ -132,8 +139,3 @@ docker build -t worker-optimizacion .
 docker run --env-file ../../.env worker-optimizacion
 ```
 
-Tests:
-
-```bash
-python -m pytest
-```
