@@ -1,31 +1,34 @@
-import React from 'react';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './hooks/useAuth';
-import Login from './pages/Login';
 import Layout from './components/layout/Layout';
 
-// Páginas del Gerente
-import GerenteDashboard from './pages/gerente/Dashboard';
-import GerenteAlertas from './pages/gerente/Alertas';
-import GerenteAhorro from './pages/gerente/Ahorro';
-import GerenteChatIA from './pages/gerente/ChatIA';
-import GerenteCamaras from './pages/gerente/Camaras';
-import GerenteHACCP from './pages/gerente/HACCP';
-import GerenteUsuarios from './pages/gerente/Usuarios';
-import GerenteHistorial from './pages/gerente/Historial';
+const Login = lazy(() => import('./pages/Login'));
 
-// Páginas del Técnico
-import TecnicoDashboard from './pages/tecnico/Dashboard';
-import TecnicoAlertas from './pages/tecnico/Alertas';
-import TecnicoChatIA from './pages/tecnico/ChatIA';
-import TecnicoHACCP from './pages/tecnico/HACCP';
-import TecnicoPanel from './pages/tecnico/PanelTecnico';
-import TecnicoHistorial from './pages/tecnico/Historial';
+const GerenteDashboard = lazy(() => import('./pages/gerente/Dashboard'));
+const GerenteAlertas = lazy(() => import('./pages/gerente/Alertas'));
+const GerenteAhorro = lazy(() => import('./pages/gerente/Ahorro'));
+const GerenteChatIA = lazy(() => import('./pages/gerente/ChatIA'));
+const GerenteCamaras = lazy(() => import('./pages/gerente/Camaras'));
+const GerenteHACCP = lazy(() => import('./pages/gerente/HACCP'));
+const GerenteUsuarios = lazy(() => import('./pages/gerente/Usuarios'));
+const GerenteHistorial = lazy(() => import('./pages/gerente/Historial'));
 
-// Página compartida
-import Soporte from './pages/Soporte';
-import Configuracion from './pages/Configuracion';
+const TecnicoDashboard = lazy(() => import('./pages/tecnico/Dashboard'));
+const TecnicoAlertas = lazy(() => import('./pages/tecnico/Alertas'));
+const TecnicoChatIA = lazy(() => import('./pages/tecnico/ChatIA'));
+const TecnicoHACCP = lazy(() => import('./pages/tecnico/HACCP'));
+const TecnicoPanel = lazy(() => import('./pages/tecnico/PanelTecnico'));
+const TecnicoHistorial = lazy(() => import('./pages/tecnico/Historial'));
+
+const Soporte = lazy(() => import('./pages/Soporte'));
+const Configuracion = lazy(() => import('./pages/Configuracion'));
+const routeFallback = (
+  <div className="min-h-screen flex items-center justify-center text-gray-500">
+    Cargando...
+  </div>
+);
 
 // ============================================================
 // RUTA PROTEGIDA
@@ -60,7 +63,7 @@ const AppRoutes = () => {
   const { user } = useAuth();
   const rol = user?.rol;
 
-  return (
+  const routes = (
     <Routes>
       <Route path="/login" element={<Login />} />
 
@@ -156,6 +159,8 @@ const AppRoutes = () => {
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
+
+  return <Suspense fallback={routeFallback}>{routes}</Suspense>;
 };
 
 function App() {

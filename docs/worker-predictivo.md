@@ -23,7 +23,7 @@ defecto, ver `config.py`). Cada vez que llega una lectura nueva:
 2. Se eliminan del historial las lecturas más antiguas que
    `VENTANA_MINUTOS`.
 3. Con los puntos que quedan (tiempo y temperatura), se calcula una
-   **regresión lineal** usando `scikit-learn`. En simple: se busca la
+    **regresión lineal** usando operaciones vectorizadas de `NumPy`. En simple: se busca la
    línea recta que mejor representa cómo ha ido cambiando la
    temperatura en ese tramo de tiempo.
 

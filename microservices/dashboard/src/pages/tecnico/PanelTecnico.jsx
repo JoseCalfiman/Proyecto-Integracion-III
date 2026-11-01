@@ -9,6 +9,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { useFetch } from '../../hooks/useApi';
+import EstadoSistema from '../../components/shared/EstadoSistema';
 import {
   getGateways, getAlertasSistema, getTraficoRed,
   getSensores, verificarSalud,
@@ -129,6 +130,9 @@ const PanelTecnico = () => {
         <h1 className="text-2xl font-bold text-gray-800">Panel de Control Técnico</h1>
         <p className="text-sm text-gray-500">Monitoreo de infraestructura y salud del sistema</p>
       </div>
+
+      {/* ESTADO DEL SISTEMA (System Controller) */}
+      <EstadoSistema />
 
       {/* ==================================================== */}
       {/* SECCIÓN 1: GATEWAYS + ALERTAS */}
