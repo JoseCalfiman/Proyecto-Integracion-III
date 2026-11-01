@@ -1,8 +1,12 @@
 FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -11,4 +15,4 @@ RUN pip install --no-cache-dir --no-compile -r requirements.txt
 
 COPY . .
 
-CMD ["python", "kafka_consumer.py"]
+CMD ["python", "main.py"]
