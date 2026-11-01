@@ -87,7 +87,7 @@ CREATE TABLE predictions (
   calculated_slope NUMERIC(8,4),
   projected_temperature NUMERIC(5,2),
   remaining_time_min NUMERIC(8,2),
-  risk_level VARCHAR(20) NOT NULL CHECK (risk_level IN ('low', 'medium', 'high', 'critical')),
+  risk_level VARCHAR(20) NOT NULL CHECK (risk_level IN ('SIN_RIESGO', 'BAJO', 'MEDIO', 'ALTO', 'CRITICO')),
   calculation_date TIMESTAMPTZ DEFAULT NOW(),
   id_worker VARCHAR(50)
 );
@@ -109,7 +109,7 @@ CREATE TABLE generated_alerts (
   resolution_date TIMESTAMPTZ
 );
 
--- 6. Auditoría de alertas
+-- 6. Auditoría de alertas  
 CREATE TABLE alert_audit (
   id_audit BIGSERIAL PRIMARY KEY,
   id_alert BIGINT REFERENCES generated_alerts(id_alert) ON DELETE CASCADE,
@@ -133,6 +133,7 @@ CREATE TABLE predicted_consumption (
   id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
   prediction_date DATE,
   predicted_consumption_kw NUMERIC(8,3),
+  UNIQUE (id_chamber, prediction_date),
   generation_date TIMESTAMPTZ DEFAULT NOW()
 );
 

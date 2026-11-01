@@ -168,3 +168,60 @@ class Prediction(Base):
     id_worker = Column(String(50))
 
     chamber = relationship("Chamber", lazy="joined")
+
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id_conversation = Column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+    id_user = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id_user"),
+        nullable=True,
+    )
+    id_chamber = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chambers.id_chamber"),
+        nullable=True,
+    )
+    start_date = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    last_activity_date = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    end_date = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
+class AiMessage(Base):
+    __tablename__ = "ai_messages"
+
+    id_message = Column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+    id_conversation = Column(
+        BigInteger,
+        ForeignKey("conversations.id_conversation"),
+        nullable=False,
+    )
+    sender = Column( # el sender es el usuario o el sistema, en este caso es el sistema,
+        String(20),
+        nullable=False,
+    )
+    content = Column(Text) # content es el mensaje enviado
+    sent_date = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )

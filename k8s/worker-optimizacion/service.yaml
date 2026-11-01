@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-optimizacion-service
+  namespace: student-aamonsalve
+spec:
+  selector:
+    app: worker-optimizacion
+  ports:
+    - name: health
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
