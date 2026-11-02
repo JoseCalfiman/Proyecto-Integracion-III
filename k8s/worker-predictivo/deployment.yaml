@@ -28,7 +28,7 @@ spec:
           echo "TimescaleDB disponible!"
       containers:
       - name: worker-predictivo
-        image: tiusko/cryometric-worker-predictivo:latest
+        image: aamonsalve/cryometric-worker-predictivo:latest
         ports:
         - containerPort: 8000
 
@@ -60,5 +60,5 @@ spec:
             cpu: "50m"
             memory: "64Mi"
           limits:
-            memory: "256Mi"
-            cpu: "500m"
+            memory: "128Mi"
+            cpu: "150m"

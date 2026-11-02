@@ -23,20 +23,25 @@ logging.basicConfig(
 )
 
 RISK_LEVEL_DB = {
-    "SIN_RIESGO": "low",
-    "BAJO": "low",
-    "MEDIO": "medium",
-    "ALTO": "high",
-    "CRITICO": "critical",
-    "CRÍTICO": "critical",
+    "SIN_RIESGO": "SIN_RIESGO",
+    "BAJO": "BAJO",
+    "MEDIO": "MEDIO",
+    "ALTO": "ALTO",
+    "CRITICO": "CRITICO",
+    "CRÍTICO": "CRITICO",
 }
 
 def mapear_risk_level(nivel_riesgo):
-    """Convierte el nivel interno del predictor al vocabulario del CHECK de la tabla predictions."""
+    """Normaliza el nivel de riesgo al vocabulario permitido por predictions."""
     nivel = RISK_LEVEL_DB.get(str(nivel_riesgo).upper())
+
     if nivel is None:
-        logging.warning(f"Nivel de riesgo desconocido '{nivel_riesgo}', se guarda como 'low'")
-        return "low"
+        logging.warning(
+            f"Nivel de riesgo desconocido '{nivel_riesgo}', "
+            f"se guarda como 'SIN_RIESGO'"
+        )
+        return "SIN_RIESGO"
+
     return nivel
 
 class PredictiveKafkaWorker:
