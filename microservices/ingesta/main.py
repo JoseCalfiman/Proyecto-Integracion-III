@@ -12,6 +12,8 @@ from routes import (
     haccp,
     dashboard,
     gemini,
+    optimizacion,
+    predictions,
 )
 
 from mqtt_client import (
@@ -73,6 +75,9 @@ app.include_router(
     gemini.router,
     prefix="/api/v1",
 )
+
+app.include_router(optimizacion.router, prefix="/api/v1")
+app.include_router(predictions.router, prefix="/api/v1")
 
 
 # ============================================================

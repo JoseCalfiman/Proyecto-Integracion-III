@@ -2,12 +2,15 @@ __pycache__/
 *.py[cod]
 *.so
 .pytest_cache/
-.pytest_cache
 .coverage
 tests/
-.env
+.env*
 .git/
 .gitignore
 *.md
 Dockerfile
 .dockerignore
+venv/
+.venv/
+htmlcov/
+requirements-dev.txt

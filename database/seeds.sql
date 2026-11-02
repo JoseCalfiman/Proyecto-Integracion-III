@@ -76,6 +76,55 @@ VALUES
     'Túnel de Enfriamiento A',
     'Área de Despacho',
     TRUE
+  ),
+  (
+    '77777777-7777-7777-7777-777777777777',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Principal 03',
+    'Sector Norte - Refrigerados',
+    TRUE
+  ),
+  (
+    '88888888-8888-8888-8888-888888888888',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Principal 04',
+    'Sector Sur - Congelados',
+    TRUE
+  ),
+  (
+    '99999999-9999-9999-9999-999999999999',
+    '11111111-1111-1111-1111-111111111111',
+    'Túnel de Enfriamiento B',
+    'Área de Despacho',
+    TRUE
+  ),
+  (
+    'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Congelados 01',
+    'Zona de Almacenamiento A',
+    TRUE
+  ),
+  (
+    'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Congelados 02',
+    'Zona de Almacenamiento B',
+    TRUE
+  ),
+  (
+    'cccccccc-cccc-cccc-cccc-cccccccccccc',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Refrigerados 01',
+    'Zona de Productos Frescos',
+    TRUE
+  ),
+  (
+    'dddddddd-dddd-dddd-dddd-dddddddddddd',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Refrigerados 02',
+    'Zona de Preparación',
+    TRUE
   );
 
 -- ============================================================

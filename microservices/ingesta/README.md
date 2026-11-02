@@ -101,3 +101,75 @@ Pruebas sin PostgreSQL, MQTT ni Kafka:
 ```bash
 venv/bin/python -m unittest discover -s microservices/ingesta/tests -p test_historial.py
 ```
+
+### APIs de optimización
+
+Ambas rutas responden con listas JSON y aceptan `id_chamber=<UUID>` opcional.
+Un UUID inválido devuelve 422; sin resultados devuelven `[]`.
+
+- `GET /api/v1/optimizacion/recommendations`: consulta `saving_recommendation`,
+  solo con `status=pending`, ordenada por creación e ID descendentes. Mapea
+  `id_recommendation → id`, `action → titulo`, `rationale → descripcion`,
+  `expected_saving_pct → porcentaje_ahorro`, `expected_saving_amount → monto_clp`.
+  Incluye `id_chamber`, `status` y `created_at`. Los importes y porcentajes son
+  números JSON o `null`. No se inventan prioridades ni iconos, que no están persistidos.
+- `GET /api/v1/optimizacion/forecast`: consulta `predicted_consumption` y devuelve
+  `{ "date": "2026-11-02", "pronostico": 150.0, "historico": null }` por día,
+  en orden ascendente. Suma las cámaras cuando no se filtra una. El worker guarda
+  consumo diario en kWh en la columna `predicted_consumption_kw`; la API conserva
+  ese significado. No calcula nuevos pronósticos ni inventa históricos o bandas
+  de confianza. Las filas sin fecha se excluyen.
+
+El cliente usa `/optimizacion/recommendations` (con doble `m`) y el gráfico
+`ConsumptionForecastChart` consulta `/optimizacion/forecast` directamente.
+La exportación de reportes no forma parte de estas rutas.
+
+Pruebas focalizadas, sin PostgreSQL, Kafka ni MQTT:
+
+```bash
+venv/bin/python -m unittest discover -s microservices/ingesta/tests -p test_optimizacion.py
+```
+
+### API de predicciones
+
+Consulta los resultados ya persistidos por el worker predictivo en `predictions`.
+
+- `GET /api/v1/predictions/latest?id_chamber=<UUID>`: última predicción de la cámara,
+  ordenada por `calculation_date DESC NULLS LAST` y luego `id_prediction DESC`.
+  Devuelve 404 si la cámara no existe o todavía no tiene predicciones.
+- `GET /api/v1/predictions/history?id_chamber=<UUID>&limit=100&offset=0`:
+  historial con el mismo orden. `limit` admite 1–1000 (por defecto 100);
+  `offset` debe ser mayor o igual a cero. Una cámara existente sin predicciones
+  devuelve `[]`; una cámara inexistente devuelve 404.
+
+El UUID es obligatorio; parámetros inválidos devuelven 422. La respuesta de
+`latest` es un objeto y la de `history`, una lista de objetos con este contrato:
+
+```json
+{
+  "id_prediction": 123,
+  "id_chamber": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "slope": 0.4,
+  "projected_temperature": -12.5,
+  "remaining_time_min": 42.25,
+  "risk_level": "ALTO",
+  "calculation_date": "2026-11-01T14:00:00Z"
+}
+```
+
+`slope` se obtiene de `calculated_slope` (°C/h), la temperatura se expresa en °C
+ y el tiempo en minutos. Los campos numéricos ausentes se devuelven como `null`,
+ no como cero. `risk_level` conserva el valor persistido por el worker
+ (`SIN_RIESGO`, `BAJO`, `MEDIO`, `ALTO`, `CRITICO` según el esquema de la BD).
+ No se recalculan predicciones al consultar estos endpoints.
+
+El cliente `src/api/predicciones.js` del Dashboard expone
+`getUltimaPrediccion(idChamber)` y
+`getHistorialPredicciones(idChamber, { limit, offset })`. Estos endpoints son
+independientes del historial de mediciones de sensores.
+
+Pruebas focalizadas de consultas y contrato, sin servicios externos:
+
+```bash
+venv/bin/python -m unittest discover -s microservices/ingesta/tests -p test_predictions.py
+```

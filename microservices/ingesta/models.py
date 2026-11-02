@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -144,6 +144,16 @@ class SavingRecommendation(Base):
     status = Column(String(20), default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     applied_at = Column(DateTime(timezone=True))
+
+
+class PredictedConsumption(Base):
+    __tablename__ = "predicted_consumption"
+
+    id_consumption_prediction = Column(BigInteger, primary_key=True, autoincrement=True)
+    id_chamber = Column(UUID(as_uuid=True), ForeignKey("chambers.id_chamber"))
+    prediction_date = Column(Date)
+    predicted_consumption_kw = Column(Numeric(8, 3))
+    generation_date = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class EnergyPrice(Base):
