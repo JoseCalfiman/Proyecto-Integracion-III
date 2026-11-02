@@ -1,12 +1,41 @@
 
 # su funcion principal es crear los modelos de datos que se utilizan en la API y en la base de datos. Estos modelos definen la estructura de los datos, las validaciones y las relaciones entre ellos.  
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, Literal
 from uuid import UUID
 
 from pydantic import AliasChoices, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+
+
+class SavingRecommendationRead(BaseModel):
+    id: int
+    id_chamber: Optional[UUID] = None
+    titulo: Optional[str] = None
+    descripcion: Optional[str] = None
+    porcentaje_ahorro: Optional[float] = None
+    monto_clp: Optional[float] = None
+    status: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class ConsumptionForecastRead(BaseModel):
+    date: date
+    pronostico: Optional[float] = None
+    historico: Optional[float] = None
+
+
+class PredictionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_prediction: int
+    id_chamber: UUID
+    slope: Optional[float] = Field(default=None, validation_alias="calculated_slope")
+    projected_temperature: Optional[float] = None
+    remaining_time_min: Optional[float] = None
+    risk_level: str
+    calculation_date: Optional[datetime] = None
 
 
 class SensorDataCreate(BaseModel):
