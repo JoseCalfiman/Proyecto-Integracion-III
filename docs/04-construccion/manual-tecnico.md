@@ -17,7 +17,7 @@ Explicar cómo está construido el sistema, cómo se levanta y cómo se trabaja 
 | IoT | ESP32 + MQTT (Wokwi) |
 | Ingesta / API | Python 3, FastAPI, Paho MQTT, Pydantic, SQLAlchemy |
 | Mensajería | Apache Kafka (KRaft), Mosquitto |
-| Workers | Python, scikit-learn, Prophet, APScheduler |
+| Workers | Python, NumPy, Prophet, APScheduler |
 | Persistencia | TimescaleDB / PostgreSQL 16 |
 | Frontend | React, Vite, Tailwind, Axios |
 | Contenedores | Docker, Docker Compose |
