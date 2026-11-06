@@ -1,7 +1,12 @@
+import logging
 from datetime import datetime
 from typing import List, Optional, Union
 
 import numpy as np
+
+from descriptive_stats import detectar_atipicos
+
+logger = logging.getLogger(__name__)
 
 TimestampLike = Union[datetime, float, int]
 
@@ -85,6 +90,15 @@ def evaluar_riesgo(
 
     timestamps = [d["timestamp"] for d in buffer]
     temperaturas = [d["temperature"] for d in buffer]
+
+    indices_atipicos = detectar_atipicos(temperaturas)
+    if indices_atipicos:
+        lecturas_atipicas = [buffer[indice] for indice in indices_atipicos]
+        logger.warning(
+            "Lecturas atípicas en ventana predictiva: outlier_count=%d, lecturas=%s",
+            len(lecturas_atipicas),
+            lecturas_atipicas,
+        )
 
     pendiente = calcular_pendiente(timestamps, temperaturas)
     if pendiente is None:

@@ -32,3 +32,18 @@ def test_evaluar_riesgo_preserves_threshold_behavior():
     assert result["pendiente_por_minuto"] == pytest.approx(1.0)
     assert result["tiempo_restante_min"] == pytest.approx(6.0)
     assert result["hay_riesgo"] is True
+
+
+def test_evaluar_riesgo_registra_lecturas_atipicas(caplog):
+    timestamps = [0, 60, 120, 180, 240]
+    temperaturas = [-18, -18.1, -17.9, -18, 20]
+    lecturas = [
+        {"timestamp": timestamp, "temperature": temperatura}
+        for timestamp, temperatura in zip(timestamps, temperaturas)
+    ]
+
+    resultado = evaluar_riesgo(lecturas, absolute_max_temp=-10)
+
+    assert "outlier_count=1" in caplog.text
+    assert str(lecturas[-1]) in caplog.text
+    assert resultado["pendiente_por_minuto"] == calcular_pendiente(timestamps, temperaturas)
