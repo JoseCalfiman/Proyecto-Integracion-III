@@ -28,7 +28,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck -u ${MQTT_ADMIN_USER} -P ${MQTT_ADMIN_PASSWORD} > /dev/null 2>&1 || exit 1",
+          "mosquitto_sub -t 'sensor/raw' -E -i healthcheck -u ${MQTT_ADMIN_USER} -P ${MQTT_ADMIN_PASSWORD} > /dev/null 2>&1 || exit 1",
         ]
       interval: 10s
       timeout: 10s
@@ -77,7 +77,7 @@ services:
       - kafka
     volumes:
       - ./kafka/topics-setup.sh:/topics-setup.sh:ro
-    entrypoint: ["/bin/bash", "/topics-setup.sh"]
+    entrypoint: ["/bin/bash", "-c", "tr -d '\\r' < /topics-setup.sh | bash"]
     networks:
       - frigorifico-net
 
@@ -246,7 +246,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "wget --no-verbose --tries=1 --spider http://localhost:80/ || exit 1",
+          "wget --no-verbose --tries=1 --spider http://127.0.0.1:80/ || exit 1",
         ]
       interval: 10s
       timeout: 5s

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import threading
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from math import isfinite
 from typing import Any, Iterable
 
 import pandas as pd
@@ -41,7 +42,17 @@ def _parse_timestamp(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         ts = value
     elif isinstance(value, (int, float)) and not isinstance(value, bool):
-        ts = datetime.fromtimestamp(value, tz=timezone.utc)
+        try:
+            if not isfinite(value):
+                return None
+        except OverflowError:
+            return None
+        # Unix timestamps from JavaScript clients are commonly in milliseconds.
+        timestamp = value / 1000 if abs(value) >= 1e11 else value
+        try:
+            ts = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
     elif isinstance(value, str) and value.strip():
         parsed = pd.to_datetime(value, utc=True, errors="coerce")
         if pd.isna(parsed):
@@ -59,9 +70,10 @@ def _to_float(value: Any) -> float | None:
     if value is None:
         return None
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        result = float(value)
+    except (OverflowError, TypeError, ValueError):
         return None
+    return result if isfinite(result) else None
 
 
 def normalize_reading(data: dict[str, Any]) -> dict[str, Any] | None:
@@ -101,6 +113,8 @@ class ReadingsBuffer:
     """Buffer en memoria, thread-safe, con las lecturas recientes de sensores."""
 
     def __init__(self, maxlen: int = 100_000) -> None:
+        if maxlen <= 0:
+            raise ValueError("maxlen debe ser mayor que 0")
         self._lock = threading.Lock()
         self._readings: deque[dict[str, Any]] = deque(maxlen=maxlen)
 
@@ -165,8 +179,22 @@ class ReadingsBuffer:
                     continue
 
                 seconds = min(seconds, _MAX_INTERVAL_SECONDS)
-                energy_kwh = float(current["consumption_kw"]) * seconds / 3600.0
-                daily_energy[self._day(current["ts"])] += energy_kwh
+                interval_end = current["ts"] + timedelta(seconds=seconds)
+                interval_start = current["ts"]
+                power_kw = float(current["consumption_kw"])
+
+                # Split intervals at UTC midnight so energy is attributed to
+                # the correct day instead of being counted entirely on the first.
+                while interval_start < interval_end:
+                    next_day = interval_start.replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    ) + timedelta(days=1)
+                    segment_end = min(interval_end, next_day)
+                    segment_seconds = (segment_end - interval_start).total_seconds()
+                    daily_energy[self._day(interval_start)] += (
+                        power_kw * segment_seconds / 3600.0
+                    )
+                    interval_start = segment_end
 
         if not daily_energy:
             return pd.DataFrame(columns=["ds", "y"])
