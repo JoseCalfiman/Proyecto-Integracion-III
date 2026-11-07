@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 import kafka_consumer
 import kafka_producer
+import kafka_producer
 from haccp_validator import HaccpRuleConfigurationError
 from kafka_consumer import (
     InvalidKafkaMessage,
@@ -228,6 +229,153 @@ def test_process_alert_persists_rule_configured_severity(monkeypatch):
     assert "ID de predicción: 17" in saved_alert.message
 
 
+def test_repeated_prediction_reuses_alert_and_audit(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    chamber_id = UUID(CHAMBER_ID)
+    with Session(engine) as session:
+        session.add(Chamber(id_chamber=chamber_id))
+        session.add(Prediction(id_prediction=17))
+        session.add(
+            HaccpRule(
+                id_chamber=chamber_id,
+                active=True,
+                severity="high",
+                max_absolute_temp=4,
+                min_absolute_temp=-30,
+                tolerance_time_min=15,
+            )
+        )
+        session.commit()
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    published = []
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", published.append)
+    consumer = FakeKafkaConsumer()
+    payload = valid_anomaly_payload(temperature=5, remaining_time_min=10)
+
+    for offset in (41, 42):
+        _handle_kafka_message(
+            consumer,
+            FakeKafkaMessage(json.dumps(payload).encode("utf-8"), offset),
+        )
+
+    with Session(engine) as session:
+        alerts = session.scalars(select(GeneratedAlert)).all()
+        audits = session.scalars(select(AlertAudit)).all()
+
+    assert consumer.committed_offsets == [41, 42]
+    assert len(alerts) == len(audits) == 1
+    assert audits[0].id_alert == alerts[0].id_alert
+    assert len(published) == 2
+    assert published[0]["id_alert"] == published[1]["id_alert"] == alerts[0].id_alert
+    assert published[0]["message"] == published[1]["message"] == alerts[0].message
+    assert "Nivel de riesgo: MEDIO" in alerts[0].message
+    assert "ID de predicción: 17" in alerts[0].message
+
+
+def test_distinct_predictions_create_independent_alerts(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    chamber_id = UUID(CHAMBER_ID)
+    with Session(engine) as session:
+        session.add(Chamber(id_chamber=chamber_id))
+        session.add_all([Prediction(id_prediction=17), Prediction(id_prediction=18)])
+        session.add(
+            HaccpRule(
+                id_chamber=chamber_id,
+                active=True,
+                severity="high",
+                max_absolute_temp=4,
+                min_absolute_temp=-30,
+                tolerance_time_min=15,
+            )
+        )
+        session.commit()
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    published = []
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", published.append)
+    consumer = FakeKafkaConsumer()
+
+    for prediction_id, offset in ((17, 43), (18, 44)):
+        _handle_kafka_message(
+            consumer,
+            FakeKafkaMessage(
+                json.dumps(
+                    valid_anomaly_payload(
+                        id_prediction=prediction_id,
+                        temperature=5,
+                        remaining_time_min=10,
+                    )
+                ).encode("utf-8"),
+                offset,
+            ),
+        )
+
+    with Session(engine) as session:
+        alerts = session.scalars(
+            select(GeneratedAlert).order_by(GeneratedAlert.id_prediction)
+        ).all()
+        audits = session.scalars(select(AlertAudit)).all()
+
+    assert consumer.committed_offsets == [43, 44]
+    assert [alert.id_prediction for alert in alerts] == [17, 18]
+    assert len(alerts) == len(audits) == len(published) == 2
+    assert {audit.id_alert for audit in audits} == {alert.id_alert for alert in alerts}
+
+
+def test_failed_publication_is_retried_from_existing_alert(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    chamber_id = UUID(CHAMBER_ID)
+    with Session(engine) as session:
+        session.add(Chamber(id_chamber=chamber_id))
+        session.add(Prediction(id_prediction=17))
+        session.add(
+            HaccpRule(
+                id_chamber=chamber_id,
+                active=True,
+                severity="high",
+                max_absolute_temp=4,
+                min_absolute_temp=-30,
+                tolerance_time_min=15,
+            )
+        )
+        session.commit()
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    publish_attempts = []
+
+    def fail_once(payload):
+        publish_attempts.append(payload)
+        if len(publish_attempts) == 1:
+            raise kafka_producer.HaccpAlertPublicationError("Kafka no disponible")
+
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", fail_once)
+    consumer = FakeKafkaConsumer()
+    message_payload = json.dumps(
+        valid_anomaly_payload(temperature=5, remaining_time_min=10)
+    ).encode("utf-8")
+    message = FakeKafkaMessage(message_payload, 45)
+
+    with pytest.raises(kafka_producer.HaccpAlertPublicationError):
+        _handle_kafka_message(consumer, message)
+
+    assert consumer.committed_offsets == []
+    with Session(engine) as session:
+        assert len(session.scalars(select(GeneratedAlert)).all()) == 1
+        assert len(session.scalars(select(AlertAudit)).all()) == 1
+
+    assert _handle_kafka_message(consumer, message) is True
+    with Session(engine) as session:
+        alerts = session.scalars(select(GeneratedAlert)).all()
+        audits = session.scalars(select(AlertAudit)).all()
+
+    assert consumer.committed_offsets == [45]
+    assert len(alerts) == len(audits) == 1
+    assert publish_attempts[0] == publish_attempts[1]
+    assert publish_attempts[1]["id_alert"] == alerts[0].id_alert
+    assert publish_attempts[1]["message"] == alerts[0].message
+
+
 def test_process_alert_rejects_null_rule_severity_as_invalid(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(bind=engine)
@@ -364,7 +512,9 @@ def test_transient_database_failure_does_not_confirm_offset(monkeypatch):
 
 def test_valid_anomaly_contract_is_accepted_and_committed(monkeypatch):
     consumer = FakeKafkaConsumer()
-    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: create_engine("sqlite://"))
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
     monkeypatch.setattr(kafka_consumer, "get_active_rule", lambda session, chamber_id: None)
 
     _handle_kafka_message(
@@ -688,8 +838,10 @@ def test_invalid_active_rule_leaves_offset_uncommitted_and_stops_processing(
     monkeypatch, caplog, rule_overrides
 ):
     caplog.set_level("ERROR")
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(
-        kafka_consumer, "get_engine", lambda: create_engine("sqlite://")
+        kafka_consumer, "get_engine", lambda: engine
     )
     rule_values = {
         "severity": "high",
@@ -779,7 +931,11 @@ def test_missing_active_rule_uses_defaults_and_continues_processing(
         consumer,
         FakeKafkaMessage(
             json.dumps(
-                valid_anomaly_payload(temperature=4, remaining_time_min=16)
+                valid_anomaly_payload(
+                    id_prediction=18,
+                    temperature=4,
+                    remaining_time_min=16,
+                )
             ).encode("utf-8"),
             321,
         ),

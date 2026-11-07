@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from models import Chamber, HaccpRule
+from models import Chamber, GeneratedAlert, HaccpRule, Prediction
 
 
 # ============================================================
@@ -57,4 +57,22 @@ def get_active_rule(session: Session, chamber_id: UUID) -> HaccpRule | None:
             HaccpRule.active.is_(True),
         )
         .order_by(HaccpRule.review_date.desc())
+    )
+
+
+def lock_prediction_and_get_alert(
+    session: Session,
+    prediction_id: int,
+) -> GeneratedAlert | None:
+    """Serializa por predicción la búsqueda de una alerta ya creada."""
+    session.scalar(
+        select(Prediction.id_prediction)
+        .where(Prediction.id_prediction == prediction_id)
+        .with_for_update()
+    )
+    return session.scalar(
+        select(GeneratedAlert)
+        .where(GeneratedAlert.id_prediction == prediction_id)
+        .order_by(GeneratedAlert.id_alert)
+        .limit(1)
     )

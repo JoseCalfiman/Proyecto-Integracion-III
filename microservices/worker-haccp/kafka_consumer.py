@@ -25,7 +25,11 @@ from sqlalchemy.exc import (
 from sqlalchemy.orm import Session
 
 from config import get_database_url
-from crud import DEFAULT_RULE_VALUES, get_active_rule
+from crud import (
+    DEFAULT_RULE_VALUES,
+    get_active_rule,
+    lock_prediction_and_get_alert,
+)
 from haccp_validator import (
     HaccpRuleConfigurationError,
     evaluate_predictive_event,
@@ -260,10 +264,44 @@ def _persist_audit(session: Session, alert_id: int, action: str, detail: str) ->
     session.add(audit)
 
 
+def _publication_payload_for_alert(alert: GeneratedAlert) -> dict:
+    generation_date = alert.generation_date
+    if generation_date.tzinfo is None:
+        generation_date = generation_date.replace(tzinfo=timezone.utc)
+    else:
+        generation_date = generation_date.astimezone(timezone.utc)
+    return {
+        "id_alert": alert.id_alert,
+        "id_chamber": str(alert.id_chamber),
+        "id_prediction": alert.id_prediction,
+        "alert_type": alert.alert_type,
+        "severity": alert.severity,
+        "status": alert.status,
+        "message": alert.message,
+        "generation_date": generation_date.isoformat().replace("+00:00", "Z"),
+    }
+
+
 def process_alert(payload: dict) -> None:
     payload = _validate_anomaly_contract(payload)
     chamber_id = payload["id_chamber"]
     with Session(get_engine()) as session:
+        existing_alert = lock_prediction_and_get_alert(
+            session,
+            payload["id_prediction"],
+        )
+        if existing_alert is not None:
+            existing_alert_id = existing_alert.id_alert
+            publication_payload = _publication_payload_for_alert(existing_alert)
+            session.commit()
+            publish_haccp_alert(publication_payload)
+            logger.info(
+                "Predicción %s ya tenía la alerta HACCP %s; se reutilizó",
+                payload["id_prediction"],
+                existing_alert_id,
+            )
+            return
+
         rule = get_active_rule(session, chamber_id)
         if rule is None:
             logger.warning(
@@ -307,18 +345,7 @@ def process_alert(payload: dict) -> None:
             "created",
             f"Alerta HACCP validada para cámara {chamber_id}.",
         )
-        # Snapshot flushed values before commit expires the ORM instance.
-        publication_payload = {
-            "id_alert": alert.id_alert,
-            "id_chamber": str(alert.id_chamber),
-            "id_prediction": alert.id_prediction,
-            "alert_type": alert.alert_type,
-            "severity": alert.severity,
-            "status": alert.status,
-            "message": alert.message,
-            "generation_date": alert.generation_date.astimezone(timezone.utc)
-            .isoformat().replace("+00:00", "Z"),
-        }
+        publication_payload = _publication_payload_for_alert(alert)
         session.commit()
 
         # Publication errors propagate: the source offset must remain uncommitted.
