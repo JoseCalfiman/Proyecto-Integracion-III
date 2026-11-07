@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session
 
 import kafka_consumer
+import kafka_producer
 from haccp_validator import HaccpRuleConfigurationError
 from kafka_consumer import (
     InvalidKafkaMessage,
@@ -189,12 +190,17 @@ def test_process_alert_persists_rule_configured_severity(monkeypatch):
         rule_id = rule.id_rule
 
     published = []
+
+    class FakeProducer:
+        def produce(self, topic, value, *, key, callback):
+            published.append((topic, json.loads(value.decode("utf-8"))))
+            callback(None, object())
+
+        def flush(self, timeout):
+            return 0
+
     monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
-    monkeypatch.setattr(
-        kafka_consumer,
-        "publish_haccp_alert",
-        lambda payload: published.append(payload),
-    )
+    monkeypatch.setattr(kafka_producer, "Producer", lambda config: FakeProducer())
 
     kafka_consumer.process_alert(
         valid_anomaly_payload(
@@ -213,8 +219,13 @@ def test_process_alert_persists_rule_configured_severity(monkeypatch):
     assert saved_alert.severity == "high"
     assert saved_audit is not None
     assert saved_audit.id_alert == saved_alert.id_alert
-    assert published[0]["severity"] == "high"
-    assert published[0]["id_prediction"] == 17
+    topic, published_payload = published[0]
+    assert topic == "haccp.alerts"
+    assert published_payload["severity"] == "high"
+    assert published_payload["id_prediction"] == 17
+    assert published_payload["message"] == saved_alert.message
+    assert "Nivel de riesgo: MEDIO" in saved_alert.message
+    assert "ID de predicción: 17" in saved_alert.message
 
 
 def test_process_alert_rejects_null_rule_severity_as_invalid(monkeypatch):

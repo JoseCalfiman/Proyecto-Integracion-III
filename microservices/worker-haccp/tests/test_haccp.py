@@ -45,7 +45,12 @@ def test_predictive_event_decision_boundaries(payload, expected_violation):
 
 def test_predictive_event_combines_simultaneous_violations_once():
     result = evaluate_predictive_event(
-        {"temperature": 6, "remaining_time_min": 10},
+        {
+            "temperature": 6,
+            "remaining_time_min": 10,
+            "risk_level": "CRITICO",
+            "id_prediction": 23,
+        },
         ACTIVE_RULE,
     )
 
@@ -54,6 +59,58 @@ def test_predictive_event_combines_simultaneous_violations_once():
         "temperature_above_maximum",
         "remaining_time_within_tolerance",
     ]
+    assert "temperatura observada 6.0 °C" in result["message"]
+    assert "límites HACCP [-20.0, 5.0] °C" in result["message"]
+    assert "tiempo restante 10.0 min" in result["message"]
+    assert "tolerancia 15.0 min" in result["message"]
+    assert "superior al máximo HACCP de 5.0 °C" in result["message"]
+    assert "dentro de la tolerancia HACCP (≤ 15.0 min)" in result["message"]
+    assert "Nivel de riesgo: CRITICO" in result["message"]
+    assert "ID de predicción: 23" in result["message"]
+
+
+def test_predictive_event_message_describes_temperature_below_minimum():
+    result = evaluate_predictive_event(
+        {"temperature": -20.1, "remaining_time_min": 20},
+        ACTIVE_RULE,
+    )
+
+    assert result["is_alert"] is True
+    assert "temperatura observada -20.1 °C" in result["message"]
+    assert "inferior al mínimo HACCP de -20.0 °C" in result["message"]
+
+
+def test_predictive_event_message_describes_temperature_above_maximum():
+    result = evaluate_predictive_event(
+        {"temperature": 5.1, "remaining_time_min": 20},
+        ACTIVE_RULE,
+    )
+
+    assert result["is_alert"] is True
+    assert "temperatura observada 5.1 °C" in result["message"]
+    assert "superior al máximo HACCP de 5.0 °C" in result["message"]
+
+
+def test_predictive_event_message_describes_time_within_tolerance():
+    result = evaluate_predictive_event(
+        {"temperature": 2, "remaining_time_min": 15},
+        ACTIVE_RULE,
+    )
+
+    assert result["is_alert"] is True
+    assert "tiempo restante 15.0 min" in result["message"]
+    assert "tolerancia HACCP (≤ 15.0 min)" in result["message"]
+
+
+def test_predictive_event_message_omits_unavailable_optional_context():
+    result = evaluate_predictive_event(
+        {"temperature": 6, "remaining_time_min": 20},
+        ACTIVE_RULE,
+    )
+
+    assert result["is_alert"] is True
+    assert "Nivel de riesgo:" not in result["message"]
+    assert "ID de predicción:" not in result["message"]
 
 
 @pytest.mark.parametrize(

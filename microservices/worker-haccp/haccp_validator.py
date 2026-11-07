@@ -159,10 +159,36 @@ def evaluate_predictive_event(
         violations.append("remaining_time_within_tolerance")
 
     if violations:
+        violation_details = []
+        if "temperature_below_minimum" in violations:
+            violation_details.append(
+                f"temperatura {temperature} °C inferior al mínimo HACCP "
+                f"de {min_temp} °C"
+            )
+        if "temperature_above_maximum" in violations:
+            violation_details.append(
+                f"temperatura {temperature} °C superior al máximo HACCP "
+                f"de {max_temp} °C"
+            )
+        if "remaining_time_within_tolerance" in violations:
+            violation_details.append(
+                f"tiempo restante {remaining_time} min dentro de la "
+                f"tolerancia HACCP (≤ {tolerance} min)"
+            )
+
         message = (
-            f"Alerta HACCP: temperatura {temperature}°C, tiempo restante "
-            f"{remaining_time} min; infracciones: {', '.join(violations)}."
+            f"Alerta HACCP: temperatura observada {temperature} °C; "
+            f"límites HACCP [{min_temp}, {max_temp}] °C; tiempo restante "
+            f"{remaining_time} min; tolerancia {tolerance} min. "
+            f"Infracciones: {'; '.join(violation_details)}."
         )
+        context = []
+        if payload.get("risk_level") is not None:
+            context.append(f"Nivel de riesgo: {payload['risk_level']}")
+        if payload.get("id_prediction") is not None:
+            context.append(f"ID de predicción: {payload['id_prediction']}")
+        if context:
+            message += f" {'; '.join(context)}."
     else:
         message = (
             f"Sin infracción HACCP: temperatura {temperature}°C dentro del "
