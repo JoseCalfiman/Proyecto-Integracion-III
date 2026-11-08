@@ -76,6 +76,55 @@ VALUES
     'Túnel de Enfriamiento A',
     'Área de Despacho',
     TRUE
+  ),
+  (
+    '77777777-7777-7777-7777-777777777777',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Principal 03',
+    'Sector Norte - Refrigerados',
+    TRUE
+  ),
+  (
+    '88888888-8888-8888-8888-888888888888',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Principal 04',
+    'Sector Sur - Congelados',
+    TRUE
+  ),
+  (
+    '99999999-9999-9999-9999-999999999999',
+    '11111111-1111-1111-1111-111111111111',
+    'Túnel de Enfriamiento B',
+    'Área de Despacho',
+    TRUE
+  ),
+  (
+    'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Congelados 01',
+    'Zona de Almacenamiento A',
+    TRUE
+  ),
+  (
+    'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Congelados 02',
+    'Zona de Almacenamiento B',
+    TRUE
+  ),
+  (
+    'cccccccc-cccc-cccc-cccc-cccccccccccc',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Refrigerados 01',
+    'Zona de Productos Frescos',
+    TRUE
+  ),
+  (
+    'dddddddd-dddd-dddd-dddd-dddddddddddd',
+    '11111111-1111-1111-1111-111111111111',
+    'Cámara Refrigerados 02',
+    'Zona de Preparación',
+    TRUE
   );
 
 -- ============================================================
@@ -170,10 +219,10 @@ VALUES
 -- ============================================================
 INSERT INTO predictions (id_chamber, calculated_slope, projected_temperature, remaining_time_min, risk_level, id_worker)
 VALUES
-  ('44444444-4444-4444-4444-444444444444', 0.4000, -18.2, 145.00, 'low', 'worker-predictivo-1'),
-  ('55555555-5555-5555-5555-555555555555', 1.8000, -12.5, 42.00, 'medium', 'worker-predictivo-1'),
-  ('66666666-6666-6666-6666-666666666666', 4.2000, -4.8, 12.00, 'critical', 'worker-predictivo-1'),
-  ('44444444-4444-4444-4444-444444444444', 0.2000, -19.1, 180.00, 'low', 'worker-predictivo-1');
+  ('44444444-4444-4444-4444-444444444444', 0.4000, -18.2, 145.00, 'BAJO', 'worker-predictivo-1'),
+  ('55555555-5555-5555-5555-555555555555', 1.8000, -12.5, 42.00, 'MEDIO', 'worker-predictivo-1'),
+  ('66666666-6666-6666-6666-666666666666', 4.2000, -4.8, 12.00, 'CRITICO', 'worker-predictivo-1'),
+  ('44444444-4444-4444-4444-444444444444', 0.2000, -19.1, 180.00, 'BAJO', 'worker-predictivo-1');
 
 -- ============================================================
 -- 10. ALERTAS GENERADAS

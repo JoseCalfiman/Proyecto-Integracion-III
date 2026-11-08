@@ -6,6 +6,8 @@ identificar alertas por riesgo de cadena de frío.
 
 from __future__ import annotations
 
+import math
+from decimal import Decimal
 from typing import Any, Iterable, List, Mapping, Optional
 
 DEFAULT_HACCP_RULE = {
@@ -17,6 +19,10 @@ DEFAULT_HACCP_RULE = {
     "critical_temp_c": 6.0,
     "sample_interval_seconds": 10,
 }
+
+
+class HaccpRuleConfigurationError(ValueError):
+    """An active HACCP rule contains missing or incompatible values."""
 
 
 def _normalize_rule(rule: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -78,6 +84,100 @@ def evaluate_temperature_rule(
         "duration_seconds": duration,
         "threshold_c": max_temp,
         "rule": active_rule,
+        "message": message,
+    }
+
+
+def evaluate_predictive_event(
+    payload: Mapping[str, Any],
+    rule: Any,
+) -> dict[str, Any]:
+    """Evalúa un evento predictivo con la regla HACCP activa de su cámara."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("El evento predictivo debe ser un objeto.")
+
+    event_values = {}
+    for field in ("temperature", "remaining_time_min"):
+        value = payload.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"El campo {field} debe ser un número.")
+        try:
+            number = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError(f"El campo {field} debe ser finito.") from exc
+        if not math.isfinite(number):
+            raise ValueError(f"El campo {field} debe ser finito.")
+        event_values[field] = number
+
+    if event_values["remaining_time_min"] < 0:
+        raise ValueError("El campo remaining_time_min no puede ser negativo.")
+
+    def rule_number(field: str) -> float:
+        if isinstance(rule, Mapping):
+            value = rule.get(field)
+        else:
+            value = getattr(rule, field, None)
+
+        if value is None or isinstance(value, bool) or not isinstance(
+            value, (int, float, Decimal)
+        ):
+            raise HaccpRuleConfigurationError(
+                f"La regla HACCP activa requiere un valor numérico en {field}."
+            )
+        try:
+            number = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise HaccpRuleConfigurationError(
+                f"El valor de {field} en la regla HACCP no es compatible."
+            ) from exc
+        if not math.isfinite(number):
+            raise HaccpRuleConfigurationError(
+                f"El valor de {field} en la regla HACCP debe ser finito."
+            )
+        return number
+
+    min_temp = rule_number("min_absolute_temp")
+    max_temp = rule_number("max_absolute_temp")
+    tolerance = rule_number("tolerance_time_min")
+    if min_temp > max_temp:
+        raise HaccpRuleConfigurationError(
+            "La regla HACCP tiene min_absolute_temp mayor que max_absolute_temp."
+        )
+    if tolerance < 0:
+        raise HaccpRuleConfigurationError(
+            "La regla HACCP tiene tolerance_time_min negativa."
+        )
+
+    temperature = event_values["temperature"]
+    remaining_time = event_values["remaining_time_min"]
+    violations = []
+    if temperature < min_temp:
+        violations.append("temperature_below_minimum")
+    if temperature > max_temp:
+        violations.append("temperature_above_maximum")
+    if remaining_time <= tolerance:
+        violations.append("remaining_time_within_tolerance")
+
+    if violations:
+        message = (
+            f"Alerta HACCP: temperatura {temperature}°C, tiempo restante "
+            f"{remaining_time} min; infracciones: {', '.join(violations)}."
+        )
+    else:
+        message = (
+            f"Sin infracción HACCP: temperatura {temperature}°C dentro del "
+            f"rango [{min_temp}, {max_temp}]°C y tiempo restante "
+            f"{remaining_time} min sobre la tolerancia de {tolerance} min."
+        )
+
+    return {
+        "is_alert": bool(violations),
+        "temperature": temperature,
+        "remaining_time_min": remaining_time,
+        "min_absolute_temp": min_temp,
+        "max_absolute_temp": max_temp,
+        "tolerance_time_min": tolerance,
+        "violations": violations,
         "message": message,
     }
 
@@ -213,7 +313,9 @@ def validar_haccp(payload: Mapping[str, Any], rule: Any) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_HACCP_RULE",
+    "HaccpRuleConfigurationError",
     "evaluate_temperature_rule",
     "evaluate_temperature_series",
+    "evaluate_predictive_event",
     "validar_haccp",
 ]

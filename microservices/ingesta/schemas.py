@@ -1,19 +1,60 @@
 
 # su funcion principal es crear los modelos de datos que se utilizan en la API y en la base de datos. Estos modelos definen la estructura de los datos, las validaciones y las relaciones entre ellos.  
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, Literal
 from uuid import UUID
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+
+
+class SavingRecommendationRead(BaseModel):
+    id: int
+    id_chamber: Optional[UUID] = None
+    titulo: Optional[str] = None
+    descripcion: Optional[str] = None
+    porcentaje_ahorro: Optional[float] = None
+    monto_clp: Optional[float] = None
+    status: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class ConsumptionForecastRead(BaseModel):
+    date: date
+    pronostico: Optional[float] = None
+    historico: Optional[float] = None
+
+
+class PredictionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_prediction: int
+    id_chamber: UUID
+    slope: Optional[float] = Field(default=None, validation_alias="calculated_slope")
+    projected_temperature: Optional[float] = None
+    remaining_time_min: Optional[float] = None
+    risk_level: str
+    calculation_date: Optional[datetime] = None
 
 
 class SensorDataCreate(BaseModel):
     id_chamber: UUID = Field(validation_alias=AliasChoices("id_chamber", "chamber_id"))
-    temperature: float = Field(ge=-50, le=50)
-    consumption_kw: float = Field(ge=0, le=999.999)
-    timestamp: datetime = Field(validation_alias=AliasChoices("timestamp", "recorded_at"))
+    temperature: float = Field(ge=-50, le=50, strict=True, allow_inf_nan=False)
+    consumption_kw: float = Field(ge=0, le=999.999, strict=True, allow_inf_nan=False)
+    timestamp: AwareDatetime = Field(validation_alias=AliasChoices("timestamp", "recorded_at"))
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def validate_timestamp_format(cls, value):
+        if not isinstance(value, (str, datetime)):
+            raise ValueError("timestamp debe ser una fecha ISO 8601 con zona horaria")
+        if isinstance(value, str):
+            try:
+                datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                raise ValueError("timestamp debe ser una fecha ISO 8601 con zona horaria")
+        return value
 
 
 class DashboardLive(BaseModel):
@@ -21,6 +62,16 @@ class DashboardLive(BaseModel):
     active_alerts: int
     total_consumption_kw: float
     estimated_savings_clp: float
+
+
+class HistoricalMeasurement(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_data: int
+    id_chamber: UUID
+    timestamp: datetime
+    temperature: Optional[float] = None
+    consumption_kw: Optional[float] = None
 
 
 class SensorDataRead(SensorDataCreate):
@@ -119,3 +170,87 @@ class HaccpRuleRead(BaseModel):
     active: bool
     review_date: Optional[datetime] = None
     id_user_modified: Optional[UUID] = None
+
+class GeminiChatRequest(BaseModel):
+    pregunta: str = Field(
+        min_length=1,
+        max_length=2000,
+    )
+
+    camara_id: UUID
+
+    @field_validator("pregunta")
+    @classmethod
+    def pregunta_no_vacia(
+        cls,
+        value: str,
+    ) -> str:
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "pregunta no puede estar vacía"
+            )
+
+        return value
+
+
+class GeminiChatResponse(BaseModel):
+    respuesta: str
+
+    camara_id: UUID
+
+    modelo: str
+
+    periodo_horas: int
+
+    mediciones_consideradas: int
+
+    alertas_consideradas: int
+
+
+class GeminiChatRequest(BaseModel):
+    pregunta: str = Field(
+        min_length=1,
+        max_length=2000,
+    )
+
+    camara_id: UUID
+
+    id_conversation: Optional[int] = Field(
+        default=None,
+        ge=1,
+    )
+
+    @field_validator("pregunta")
+    @classmethod
+    def pregunta_no_vacia(
+        cls,
+        value: str,
+    ) -> str:
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "pregunta no puede estar vacía"
+            )
+
+        return value
+
+
+class GeminiChatResponse(BaseModel):
+    respuesta: str
+
+    camara_id: UUID
+
+    id_conversation: int
+
+    modelo: str
+
+    periodo_horas: int
+
+    mediciones_consideradas: int
+
+    alertas_consideradas: int
