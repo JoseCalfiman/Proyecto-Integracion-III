@@ -39,6 +39,12 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 2
           failureThreshold: 3
+        env:
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: ingesta-auth
+              key: JWT_SECRET
         envFrom:
         - configMapRef:
             name: app-config
