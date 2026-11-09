@@ -1,130 +1,126 @@
-import React, { useState, useEffect } from "react";
-import { Camera, AlertTriangle, Zap, TrendingUp } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Camera, AlertTriangle, Zap, TrendingUp, Activity } from "lucide-react";
 import MetricCard from "../../components/ui/MetricCard";
-import TemperatureChart from "../../components/charts/TemperatureChart";
 import ConsumptionChart from "../../components/charts/ConsumptionChart";
-import {
-  getDashboardLive,
-  getTemperatureSeries,
-  getConsumptionSeries,
-} from "../../api/dashboard";
+import { getDashboardLive, getConsumptionSeries } from "../../api/dashboard";
+
+// Resumen de negocio: sin métricas de infraestructura ni datos simulados.
+const RESUMEN_INTERVALO_MS = 15000; // Cada 15 segundos, para que la gerencia vea cambios de estado rápido.
+const CONSUMO_INTERVALO_MS = 60000; // Cada 60 segundos, para no sobrecargar la API con series de consumo que cambian lentamente.
+const numeroValido = (n) => n !== null && n !== undefined && Number.isFinite(Number(n));
 
 const Dashboard = () => {
-  const [ultimaActualizacion, setUltimaActualizacion] = useState(new Date());
-  const [datos, setDatos] = useState({
-    active_chambers: 0,
-    active_alerts: 0,
-    total_consumption_kw: 0,
-    estimated_savings_clp: 0,
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  // Series de los gráficos (arrays vacíos mientras cargan, para no mostrar datos falsos)
-  const [temperatura, setTemperatura] = useState({ data: [], series: [] });
+  const [datos, setDatos] = useState(null);
   const [consumo, setConsumo] = useState([]);
-  const [errorGraficos, setErrorGraficos] = useState(null);
+  const [cargaResumen, setCargaResumen] = useState(true);
+  const [cargaConsumo, setCargaConsumo] = useState(true);
+  const [errorResumen, setErrorResumen] = useState(null);
+  const [errorConsumo, setErrorConsumo] = useState(null);
+  const [ultimaActualizacion, setUltimaActualizacion] = useState(null);
 
-  // Tarjetas: cada 2 s
+  // Planificar la siguiente consulta al finalizar la anterior evita solapamientos.
   useEffect(() => {
-    const fetchDatos = async () => {
+    let vigente = true;
+    let timeout;
+    const actualizar = async () => {
       try {
-        setDatos(await getDashboardLive());
-        setError(null);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+        const respuesta = await getDashboardLive();
+        if (!vigente) return;
+        setDatos(respuesta);
+        setErrorResumen(null);
         setUltimaActualizacion(new Date());
+      } catch (error) {
+        if (vigente) setErrorResumen(error.message);
+      } finally {
+        if (vigente) {
+          setCargaResumen(false);
+          timeout = setTimeout(actualizar, RESUMEN_INTERVALO_MS);
+        }
       }
     };
-    fetchDatos();
-    const interval = setInterval(fetchDatos, 2000);
-    return () => clearInterval(interval);
+    actualizar();
+    return () => { vigente = false; clearTimeout(timeout); };
   }, []);
 
-  // Gráficos: cada 30s
   useEffect(() => {
-    const fetchGraficos = async () => {
+    let vigente = true;
+    let timeout;
+    const actualizar = async () => {
       try {
-        const [t, c] = await Promise.all([
-          getTemperatureSeries(120),
-          getConsumptionSeries(7),
-        ]);
-        setTemperatura(t);
-        setConsumo(c);
-        setErrorGraficos(null);
-      } catch (err) {
-        setErrorGraficos(err.message);
+        const respuesta = await getConsumptionSeries(7);
+        if (!vigente) return;
+        setConsumo(Array.isArray(respuesta) ? respuesta : []);
+        setErrorConsumo(null);
+      } catch (error) {
+        if (vigente) setErrorConsumo(error.message);
+      } finally {
+        if (vigente) {
+          setCargaConsumo(false);
+          timeout = setTimeout(actualizar, CONSUMO_INTERVALO_MS);
+        }
       }
     };
-    fetchGraficos();
-    const interval = setInterval(fetchGraficos, 30000);
-    return () => clearInterval(interval);
+    actualizar();
+    return () => { vigente = false; clearTimeout(timeout); };
   }, []);
+
+  const convertir = (n) => numeroValido(n) ? Number(n) : null;
+  const camaras = convertir(datos?.active_chambers);
+  const sinReconocer = convertir(datos?.active_alerts);
+  const potencia = convertir(datos?.total_consumption_kw);
+  const ahorro = convertir(datos?.estimated_savings_clp);
+  const formato = (n, decimales = 0) => n === null ? "—" : n.toLocaleString("es-CL", {
+    minimumFractionDigits: decimales, maximumFractionDigits: decimales,
+  });
+
+  // Backend /dashboard/live cuenta 'active', no 'acknowledged'.
+  // Por eso no aseguramos que la planta esté saludable cuando el contador sea cero.
+  const estado = errorResumen
+    ? { titulo: "Datos sin actualizar", detalle: "No se pudo actualizar el resumen. Se muestra el último dato disponible.", estilo: "bg-amber-50 text-amber-800 border-amber-200" }
+    : cargaResumen || !datos || sinReconocer === null
+      ? { titulo: "Consultando estado", detalle: "Obteniendo indicadores de la planta.", estilo: "bg-gray-50 text-gray-700 border-gray-200" }
+      : sinReconocer > 0
+        ? { titulo: "Requiere atención", detalle: `${sinReconocer} alerta(s) sin reconocer. Revisar HACCP.`, estilo: "bg-red-50 text-red-800 border-red-200" }
+        : { titulo: "Sin alertas sin reconocer", detalle: "Consultar HACCP para incidentes que ya fueron reconocidos.", estilo: "bg-green-50 text-green-800 border-green-200" };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">
-            Monitoreo en Vivo
-          </h1>
-          <p className="text-sm text-gray-500">
-            Planta Principal - Sector Frío
-          </p>
+          <h1 className="text-2xl font-bold text-gray-800">Resumen de la planta</h1>
+          <p className="text-sm text-gray-500">Indicadores operativos y económicos para gerencia</p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-          Última actualización:{" "}
-          {ultimaActualizacion.toLocaleTimeString("es-CL")}
-        </div>
+        <p className="text-sm text-gray-500" aria-live="polite">
+          {ultimaActualizacion ? `Actualizado: ${ultimaActualizacion.toLocaleTimeString("es-CL")}` : "Esperando datos de la API"}
+        </p>
       </div>
 
-      {(error || errorGraficos) && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg mb-4 text-sm">
-          {error || errorGraficos}
+      <section className={`mb-6 rounded-lg border px-5 py-4 ${estado.estilo}`} aria-live="polite">
+        <div className="flex items-start gap-3">
+          <Activity className="mt-0.5 shrink-0" size={22} aria-hidden="true" />
+          <div>
+            <h2 className="font-semibold">Estado de atención: {estado.titulo}</h2>
+            <p className="text-sm mt-1">{estado.detalle}</p>
+          </div>
         </div>
-      )}
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-        <MetricCard
-          title="Total Cámaras"
-          value={loading ? "..." : datos.active_chambers}
-          icon={Camera}
-          color="green"
-        />
-        <MetricCard
-          title="Alertas Activas"
-          value={loading ? "..." : datos.active_alerts}
-          icon={AlertTriangle}
-          color="red"
-          borderColor="border-l-4 border-red-500"
-        />
-        <MetricCard
-          title="Consumo Total"
-          value={loading ? "..." : datos.total_consumption_kw?.toFixed(2)}
-          unit="kW"r
-          icon={Zap}
-          color="yellow"
-        />
-        <MetricCard
-          title="Ahorro Estimado"
-          value={
-            loading
-              ? "..."
-              : `$${(datos.estimated_savings_clp || 0).toLocaleString("es-CL")}`
-          }
-          unit="CLP"
-          icon={TrendingUp}
-          color="green"
-        />
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
+        <MetricCard title="Cámaras habilitadas" value={cargaResumen ? "…" : formato(camaras)} icon={Camera} color="green" />
+        <MetricCard title="Alertas sin reconocer" value={cargaResumen ? "…" : formato(sinReconocer)} icon={AlertTriangle} color="red" borderColor={sinReconocer > 0 ? "border-l-4 border-red-500" : undefined} />
+        <MetricCard title="Potencia actual" value={cargaResumen ? "…" : formato(potencia, 2)} unit="kW" icon={Zap} color="yellow" />
+        <MetricCard title="Ahorro potencial pendiente" value={cargaResumen ? "…" : ahorro === null ? "—" : `$${formato(ahorro)}`} unit="CLP" icon={TrendingUp} color="green" />
       </div>
 
-      <div className="space-y-6">
-        <TemperatureChart data={temperatura.data} series={temperatura.series} />
-        <ConsumptionChart data={consumo} />
-      </div>
+      <p className="text-xs text-gray-500 mb-6">
+        Cámaras habilitadas según registro; potencia instantánea en kW (no energía acumulada).
+        El ahorro corresponde a recomendaciones pendientes, no a ahorro realizado.
+      </p>
+      {errorResumen && <p role="alert" className="mb-4 text-sm text-red-700">Error al consultar indicadores: {errorResumen}</p>}
+      {errorConsumo && <p role="alert" className="mb-4 text-sm text-red-700">No se pudo actualizar la tendencia de consumo: {errorConsumo}</p>}
+      <section aria-label="Tendencia de consumo energético">
+        <ConsumptionChart data={consumo} loading={cargaConsumo} />
+      </section>
     </div>
   );
 };
