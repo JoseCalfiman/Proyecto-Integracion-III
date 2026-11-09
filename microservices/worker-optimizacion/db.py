@@ -8,6 +8,8 @@ from datetime import date
 from typing import Any, Iterator
 from uuid import UUID
 
+from ahorro import es_recomendacion_util, generar_textos_recomendacion
+
 logger = logging.getLogger(__name__)
 
 try:  # psycopg2 es opcional para permitir tests y ejecucion sin BD.
@@ -216,29 +218,66 @@ def save_saving_recommendations(
     id_price: int | None = None,
     id_chamber: str | None = None,
 ) -> bool:
-    if not recommendations:
+    useful_recommendations = [
+        rec
+        for rec in recommendations
+        if isinstance(rec, dict)
+        and es_recomendacion_util(
+            rec.get("estimated_savings"),
+            rec.get("savings_percentage"),
+            rec.get("exception_reason") or rec.get("rationale"),
+        )
+    ]
+    if not useful_recommendations:
         return True
 
     chamber_uuid = _normalize_chamber_id(id_chamber)
     rows = []
-    for rec in recommendations:
+    for rec in useful_recommendations:
+        action = rec.get("action") or "optimizar"
+        equipment = rec.get("equipment") or "equipo"
+        amount = rec.get("estimated_savings")
+        percentage = rec.get("savings_percentage")
+        exception_reason = rec.get("exception_reason")
+        rationale = rec.get("rationale")
+
+        generated_title, generated_rationale = generar_textos_recomendacion(
+            accion=action,
+            equipo=equipment,
+            horas=float(rec.get("hours") or 0),
+            ventana=rec.get("window") or [],
+            monto=float(amount or 0),
+            porcentaje=float(percentage or 0),
+        )
+        title = rec.get("title") or generated_title
+        rationale = rationale or exception_reason or generated_rationale
+        has_positive_savings = es_recomendacion_util(amount, percentage)
+
+        justification_data = {
+            "title": title,
+            "rationale": rationale,
+            "target_date": str(target_date),
+            "equipment": equipment,
+            "action_code": action,
+            "window": rec.get("window"),
+            "hours": rec.get("hours"),
+            "price_clp_kwh": price_clp_kwh,
+        }
+        if not has_positive_savings:
+            justification_data["exception_reason"] = (
+                exception_reason or rationale
+            )
         justification = json.dumps(
-            {
-                "target_date": str(target_date),
-                "equipment": rec.get("equipment"),
-                "window": rec.get("window"),
-                "hours": rec.get("hours"),
-                "price_clp_kwh": price_clp_kwh,
-            },
+            justification_data,
             ensure_ascii=False,
         )
         rows.append(
             (
                 chamber_uuid,
                 id_price,
-                rec.get("action"),
-                rec.get("savings_percentage"),
-                rec.get("estimated_savings", 0),
+                action,
+                percentage,
+                amount,
                 justification,
                 "pending",
             )
@@ -289,7 +328,16 @@ def save_report(report: dict[str, Any]) -> bool:
     if predicted_kwh is None:
         predicted_kwh = report.get("forecasted_kwh")
 
-    recommendations = report.get("recommendations", [])
+    recommendations = [
+        rec
+        for rec in report.get("recommendations", [])
+        if isinstance(rec, dict)
+        and es_recomendacion_util(
+            rec.get("estimated_savings"),
+            rec.get("savings_percentage"),
+            rec.get("exception_reason") or rec.get("rationale"),
+        )
+    ]
 
     with get_connection() as conn:
         if conn is None:
@@ -399,6 +447,19 @@ def save_report(report: dict[str, Any]) -> bool:
             # Reemplazar recomendaciones PENDING generadas
             # para esta cámara y esta misma fecha.
             # ------------------------------------------------
+
+            cur.execute(
+                """
+                DELETE FROM saving_recommendation
+                WHERE status = 'pending'
+                  AND (
+                    expected_saving_pct IS NULL OR expected_saving_pct <= 0
+                    OR expected_saving_amount IS NULL OR expected_saving_amount <= 0
+                  )
+                  AND COALESCE(rationale, '') NOT LIKE %s
+                """,
+                ('%"exception_reason"%',),
+            )
 
             target_marker = (
                 f'%"target_date": "{str(target_date)}"%'

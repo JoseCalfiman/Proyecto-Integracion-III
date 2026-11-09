@@ -8,6 +8,8 @@ from types import ModuleType
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy import column
+
 INGESTA = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(INGESTA))
 
@@ -18,9 +20,12 @@ fake_models.SavingRecommendation = type(
     "SavingRecommendation",
     (),
     {
-        "created_at": MagicMock(),
-        "status": MagicMock(),
-        "id_recommendation": MagicMock(),
+        "created_at": column("created_at"),
+        "status": column("status"),
+        "id_recommendation": column("id_recommendation"),
+        "expected_saving_pct": column("expected_saving_pct"),
+        "expected_saving_amount": column("expected_saving_amount"),
+        "rationale": column("rationale"),
     },
 )
 with patch.dict(sys.modules, {"database": fake_database, "models": fake_models}):
@@ -41,7 +46,10 @@ def test_recommendations_api_returns_clp_amount_and_action_from_latest_run():
         expected_saving_amount=1450.0,
         rationale=(
             '{"target_date":"2026-10-29","equipment":"camaras_2_y_3",'
-            '"window":["18:00","22:00"],"hours":2}'
+            '"window":["18:00","22:00"],"hours":2,'
+            '"title":"Apagar Cámaras 2 y 3",'
+            '"rationale":"Apagar Cámaras 2 y 3 durante 2 horas en el horario de '
+            '18:00 a 22:00 podría ahorrar $1.450 CLP para el 2026-10-29."}'
         ),
         status="pending",
         created_at=generated_at,
@@ -62,8 +70,8 @@ def test_recommendations_api_returns_clp_amount_and_action_from_latest_run():
     assert result["monto_clp"] == 1450.0
     assert result["porcentaje_ahorro"] == 12.5
     assert result["titulo"] == "Apagar Cámaras 2 y 3"
-    assert "18:00–22:00" in result["descripcion"]
-    assert "2026-10-29" in result["descripcion"]
+    assert "18:00 a 22:00" in result["descripcion"]
+    assert "$1.450 CLP" in result["descripcion"]
     assert result["status"] == "pending"
     response_item = optimization_route.SavingRecommendationRead.model_validate(result)
     assert response_item.model_dump()["monto_clp"] == 1450.0

@@ -2,7 +2,7 @@ import json
 from typing import Any, List
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -29,8 +29,9 @@ def _recommendation_details(record: SavingRecommendation) -> dict[str, Any]:
 
     equipment = rationale.get("equipment")
     equipment_name = EQUIPMENT_NAMES.get(equipment, equipment or "equipo")
-    action = (record.action or "optimizar").replace("_", " ")
-    title = f"{action.capitalize()} {equipment_name}"
+    action_code = rationale.get("action_code") or record.action or "optimizar"
+    action = action_code.replace("_", " ")
+    title = rationale.get("title") or f"{action.capitalize()} {equipment_name}"
 
     window = rationale.get("window") or []
     hours = rationale.get("hours")
@@ -42,12 +43,13 @@ def _recommendation_details(record: SavingRecommendation) -> dict[str, Any]:
         details.append(f"Ventana de alto costo: {window[0]}–{window[1]}.")
     if target_date:
         details.append(f"Fecha de aplicación sugerida: {target_date}.")
+    description = rationale.get("rationale") or " ".join(details)
 
     icon = "thermometer" if "climatizacion" in str(equipment) else "snowflake"
     return {
         "id": record.id_recommendation,
         "titulo": title,
-        "descripcion": " ".join(details),
+        "descripcion": description,
         "prioridad": "media",
         "porcentaje_ahorro": float(record.expected_saving_pct or 0),
         "monto_clp": float(record.expected_saving_amount or 0),
@@ -60,9 +62,18 @@ def _recommendation_details(record: SavingRecommendation) -> dict[str, Any]:
 @router.get("/recomendaciones", response_model=List[SavingRecommendationRead])
 def list_saving_recommendations(db: Session = Depends(get_db)):
     """Devuelve las recomendaciones pendientes de la última optimización."""
+    actionable = or_(
+        and_(
+            SavingRecommendation.expected_saving_pct.isnot(None),
+            SavingRecommendation.expected_saving_pct > 0,
+            SavingRecommendation.expected_saving_amount.isnot(None),
+            SavingRecommendation.expected_saving_amount > 0,
+        ),
+        SavingRecommendation.rationale.like('%"exception_reason"%'),
+    )
     latest = (
         db.query(func.max(SavingRecommendation.created_at))
-        .filter(SavingRecommendation.status == "pending")
+        .filter(SavingRecommendation.status == "pending", actionable)
         .scalar()
     )
     if latest is None:
@@ -73,6 +84,7 @@ def list_saving_recommendations(db: Session = Depends(get_db)):
         .filter(
             SavingRecommendation.status == "pending",
             SavingRecommendation.created_at == latest,
+            actionable,
         )
         .order_by(SavingRecommendation.id_recommendation)
         .all()

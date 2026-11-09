@@ -80,7 +80,8 @@ const formatTextoTecnico = (valor) => {
 };
 
 const formatAccion = (accion) => {
-  return accionConfig[accion] || formatTextoTecnico(accion);
+  if (accionConfig[accion]) return accionConfig[accion];
+  return String(accion).includes('_') ? formatTextoTecnico(accion) : String(accion);
 };
 
 const formatEquipo = (equipo) => {
@@ -361,6 +362,11 @@ const Ahorro = () => {
                 {/* Descripción estructurada */}
                 {detalles ? (
                   <div className="space-y-3 mb-5 flex-1">
+                    {detalles.rationale && (
+                      <p className="text-sm text-gray-600 leading-relaxed">
+                        {detalles.rationale}
+                      </p>
+                    )}
                     <div className="flex items-start justify-between gap-4">
                       <span className="text-sm text-gray-500">
                         Equipo

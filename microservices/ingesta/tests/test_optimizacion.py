@@ -55,14 +55,23 @@ class OptimizationTests(unittest.TestCase):
             {'date': '2026-11-02', 'pronostico': 150.0, 'historico': None}])
         self.assertEqual(forecast(id_chamber=self.a, db=self.db)[1].pronostico, 100)
 
-    def test_empty_tables_and_nullable_values(self):
+    def test_empty_tables_and_filters_unjustified_recommendations(self):
         self.assertEqual(recommendations(db=self.db), [])
         self.assertEqual(forecast(db=self.db), [])
-        self.db.add(SavingRecommendation(id_recommendation=1, status='pending'))
+        self.db.add_all([
+            SavingRecommendation(id_recommendation=1, status='pending'),
+            SavingRecommendation(
+                id_recommendation=2,
+                status='pending',
+                rationale='{"exception_reason":"Motivo operacional explícito"}',
+            ),
+        ])
         self.db.add(PredictedConsumption(id_consumption_prediction=1,
             prediction_date=date(2026, 11, 1)))
         self.db.commit()
-        self.assertIsNone(recommendations(db=self.db)[0].monto_clp)
+        rows = recommendations(db=self.db)
+        self.assertEqual([row.id for row in rows], [2])
+        self.assertIsNone(rows[0].monto_clp)
         self.assertIsNone(forecast(db=self.db)[0].pronostico)
 
     def test_get_route_names(self):

@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 import pytest
@@ -258,7 +259,43 @@ def test_save_saving_recommendations_inserts_savings_percentage(monkeypatch):
     assert savings_percentage == 1.72
     assert amount == 1450.0
     assert status == "pending"
-    assert "target_date" in rationale
+    rationale_data = json.loads(rationale)
+    assert rationale_data["target_date"] == "2024-01-08"
+    assert rationale_data["title"] == "Apagar Cámaras 2 y 3"
+    assert "Ahorro estimado" in rationale_data["rationale"]
+
+
+def test_save_saving_recommendations_skips_unhelpful_rows(monkeypatch):
+    factory = _fake_get_connection([])
+    monkeypatch.setattr(db, "get_connection", factory)
+
+    ok = db.save_saving_recommendations(
+        target_date="2024-01-08",
+        price_clp_kwh=145.0,
+        recommendations=[
+            {"action": "apagar", "estimated_savings": None, "savings_percentage": 0},
+            {"action": "apagar", "estimated_savings": -10, "savings_percentage": -1},
+            {
+                "action": "mantener",
+                "estimated_savings": None,
+                "savings_percentage": None,
+                "rationale": "Mantener operación para cumplir el protocolo HACCP",
+            },
+        ],
+    )
+
+    assert ok is True
+    inserts = [
+        (sql, rows)
+        for sql, rows in factory.conn._cursor.executed
+        if "INSERT INTO saving_recommendation" in sql
+    ]
+    assert len(inserts) == 1
+    assert len(inserts[0][1]) == 1
+    rationale = json.loads(inserts[0][1][0][5])
+    assert rationale["exception_reason"] == (
+        "Mantener operación para cumplir el protocolo HACCP"
+    )
 
 
 def test_save_saving_recommendations_without_rows_is_noop(monkeypatch):
@@ -297,6 +334,12 @@ def test_save_report_accepts_optimization_reports_wire_fields(monkeypatch):
             "price_kwh": 145.5,
             "id_price": 1,
             "recommendations": [
+                {
+                    "equipment": "eq_climatizacion_zona_b",
+                    "action": "reducir_carga",
+                    "estimated_savings": 0,
+                    "savings_percentage": 0,
+                },
                 {
                     "equipment": "camaras_2_y_3",
                     "action": "apagar",

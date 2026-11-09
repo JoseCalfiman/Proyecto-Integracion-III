@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 from confluent_kafka import Producer
-from ahorro import Action, calcular_ahorro_action
+from ahorro import (
+    Action,
+    calcular_ahorro_action,
+    es_recomendacion_util,
+    generar_textos_recomendacion,
+)
 
 REPORT_TOPIC = os.getenv("KAFKA_REPORT_TOPIC", "optimization.reports")
 BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
@@ -90,6 +96,18 @@ def build_recommendation(
         # Protección adicional para el contrato y PostgreSQL.
         savings_percentage = min(max(savings_percentage, 0.0), 100.0)
 
+        if not es_recomendacion_util(savings, savings_percentage):
+            continue
+
+        title, rationale = generar_textos_recomendacion(
+            accion=action.action,
+            equipo=action.equipment,
+            horas=action.hours,
+            ventana=action.window,
+            monto=savings,
+            porcentaje=savings_percentage,
+        )
+
         remaining_budget = max(remaining_budget - savings, 0.0)
         total_savings += savings
 
@@ -97,6 +115,8 @@ def build_recommendation(
             {
                 "equipment": action.equipment,
                 "action": action.action,
+                "title": title,
+                "rationale": rationale,
                 "window": list(action.window),
                 "hours": action.hours,
                 "estimated_savings": savings,
@@ -147,7 +167,28 @@ def publish_report(
     if producer is None:
         producer = build_producer()
 
-    payload = json.dumps(report, ensure_ascii=False)
+    recommendations = [
+        recommendation
+        for recommendation in report.get("recommendations", [])
+        if isinstance(recommendation, dict)
+        and es_recomendacion_util(
+            recommendation.get("estimated_savings"),
+            recommendation.get("savings_percentage"),
+            recommendation.get("exception_reason") or recommendation.get("rationale"),
+        )
+    ]
+    safe_report = dict(report)
+    safe_report["recommendations"] = recommendations
+    total_savings = 0.0
+    for recommendation in recommendations:
+        try:
+            amount = float(recommendation.get("estimated_savings") or 0)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(amount) and amount > 0:
+            total_savings += amount
+    safe_report["estimated_savings"] = total_savings
+    payload = json.dumps(safe_report, ensure_ascii=False)
     delivery: dict[str, Any] = {"called": False, "error": None}
 
     def delivery_callback(err, msg) -> None:

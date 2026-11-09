@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, text
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -57,7 +57,18 @@ def _estimated_savings_clp(db: Session) -> float:
     """Suma del ahorro estimado de todas las recomendaciones pendientes."""
     total = (
         db.query(func.sum(SavingRecommendation.expected_saving_amount))
-        .filter(SavingRecommendation.status == "pending")
+        .filter(
+            SavingRecommendation.status == "pending",
+            or_(
+                and_(
+                    SavingRecommendation.expected_saving_pct.isnot(None),
+                    SavingRecommendation.expected_saving_pct > 0,
+                    SavingRecommendation.expected_saving_amount.isnot(None),
+                    SavingRecommendation.expected_saving_amount > 0,
+                ),
+                SavingRecommendation.rationale.like('%"exception_reason"%'),
+            ),
+        )
         .scalar()
     )
 

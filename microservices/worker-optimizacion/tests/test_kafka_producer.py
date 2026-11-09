@@ -41,6 +41,10 @@ def test_build_recommendation_records_are_valid():
     report = _build_report()
     for rec in report["recommendations"]:
         assert set(rec.keys()) >= {"equipment", "action", "window"}
+        assert rec["estimated_savings"] > 0
+        assert rec["savings_percentage"] > 0
+        assert rec["title"]
+        assert rec["rationale"]
 
 
 def test_build_recommendation_includes_savings_percentage():
@@ -59,8 +63,14 @@ def test_build_recommendation_caps_savings_at_projected_daily_cost():
     assert report["estimated_savings"] == report["projected_daily_cost"]
     assert report["recommendations"][0]["estimated_savings"] == report["projected_daily_cost"]
     assert report["recommendations"][0]["savings_percentage"] == 100.0
-    assert report["recommendations"][1]["estimated_savings"] == 0.0
-    assert report["recommendations"][1]["savings_percentage"] == 0.0
+    assert len(report["recommendations"]) == 1
+
+
+def test_build_recommendation_omits_actions_without_positive_savings():
+    report = _build_report(predicted_kwh=0)
+
+    assert report["estimated_savings"] == 0
+    assert report["recommendations"] == []
 
 
 class FakeMessage:
@@ -150,3 +160,21 @@ def test_report_is_json_serializable():
     payload = json.dumps(_build_report(), ensure_ascii=False)
     assert isinstance(payload, str)
     assert json.loads(payload)["type"] == "optimization_report"
+
+
+def test_publish_report_filters_unhelpful_recommendations():
+    producer = FakeProducer()
+    report = _build_report()
+    valid_recommendations = list(report["recommendations"])
+    report["recommendations"].extend(
+        [
+            {"estimated_savings": 0, "savings_percentage": 0},
+            {"estimated_savings": -10, "savings_percentage": -1},
+        ]
+    )
+
+    publish_report(report, producer=producer)
+
+    payload = json.loads(producer.produced["value"].decode("utf-8"))
+    assert payload["recommendations"] == valid_recommendations
+    assert payload["estimated_savings"] == report["estimated_savings"]
