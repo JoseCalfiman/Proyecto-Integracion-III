@@ -2,11 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import threading
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import threading
-
 from routes import (
+    auth,
+    historial,
     chambers,
     alerts,
     haccp,
@@ -76,6 +74,8 @@ app.include_router(
     prefix="/api/v1",
 )
 
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(historial.router, prefix="/api/v1")
 app.include_router(optimizacion.router, prefix="/api/v1")
 app.include_router(predictions.router, prefix="/api/v1")
 

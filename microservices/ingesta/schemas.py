@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import Optional, Literal
 from uuid import UUID
 
-from pydantic import AliasChoices, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import SecretStr, AliasChoices, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 
@@ -254,3 +254,7 @@ class GeminiChatResponse(BaseModel):
     mediciones_consideradas: int
 
     alertas_consideradas: int
+
+class LoginRequest(BaseModel):
+    email: str = Field(max_length=150)
+    password: SecretStr
