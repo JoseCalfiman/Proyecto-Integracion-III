@@ -31,21 +31,12 @@ export const getAlertaById = async (id) => {
   }
 };
 
-// Solo técnico
-const idUsuario = () => {
-  try {
-    return JSON.parse(localStorage.getItem("user"))?.id;
-  } catch {
-    return undefined;
-  }
-};
-
 // reconocer la alerta por el lado del tecnico
 export const reconocerAlerta = async (id) => {
   try {
     const { data } = await apiClient.put(
       `/alerts/${idNumerico(id)}/acknowledge`,
-      { id_user: idUsuario() },
+      {},
     );
     return alertaFromApi(data);
   } catch (error) {
@@ -56,9 +47,7 @@ export const reconocerAlerta = async (id) => {
 // resolver alterta (solo tecnico)
 export const resolverAlerta = async (id) => {
   try {
-    const { data } = await apiClient.put(`/alerts/${idNumerico(id)}/resolve`, {
-      id_user: idUsuario(),
-    });
+    const { data } = await apiClient.put(`/alerts/${idNumerico(id)}/resolve`, {});
     return alertaFromApi(data);
   } catch (error) {
     throw new Error(msg(error, "Error al resolver la alerta"));

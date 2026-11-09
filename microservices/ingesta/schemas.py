@@ -106,7 +106,6 @@ class ChamberRead(BaseModel):
     created_at: Optional[datetime] = None
 
 class AlertAction(BaseModel):
-    id_user: UUID  # temporal: saldrá del JWT cuando exista auth
     note: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -148,7 +147,6 @@ class HaccpRuleUpdate(BaseModel):
     tolerance_time_min: int = Field(ge=1, le=1440)
     severity: HaccpSeverity = "medium"
     active: bool = True
-    id_user_modified: Optional[UUID] = None  # temporal: saldrá del JWT
 
     @model_validator(mode="after")
     def check_range(self):

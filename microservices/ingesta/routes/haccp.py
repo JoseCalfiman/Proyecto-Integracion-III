@@ -5,8 +5,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from auth import technician
 from database import get_db
-from models import Chamber, HaccpRule, User
+from models import Chamber, HaccpRule
 from schemas import HaccpRuleRead, HaccpRuleUpdate
 
 router = APIRouter(prefix="/haccp", tags=["haccp"])
@@ -63,7 +64,7 @@ def _get_rule(db: Session, id_chamber: UUID) -> Optional[HaccpRule]:
     )
 
 
-# Permisos: técnico y gerente (TODO: agregar dependencia de auth cuando exista auth.py)
+# Permisos: técnico y gerente
 @router.get("/rules", response_model=List[HaccpRuleRead])
 def list_rules(db: Session = Depends(get_db)):
     """Lista todas las cámaras activas con su regla HACCP (o los valores por defecto si no tienen)."""
@@ -85,14 +86,11 @@ def get_rule(id_chamber: UUID, db: Session = Depends(get_db)):
     return _build_read(chamber, _get_rule(db, id_chamber))
 
 
-# Permisos: técnico y gerente
+# Permisos: solo técnico
 @router.put("/rules/{id_chamber}", response_model=HaccpRuleRead)
-def update_rule(id_chamber: UUID, data: HaccpRuleUpdate, db: Session = Depends(get_db)):
+def update_rule(id_chamber: UUID, data: HaccpRuleUpdate, user=Depends(technician), db: Session = Depends(get_db)):
     """Actualiza la regla de la cámara; si todavía no tiene una, la crea."""
     chamber = _get_chamber_or_404(db, id_chamber)
-
-    if data.id_user_modified and db.get(User, data.id_user_modified) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuario no encontrado")
 
     rule = _get_rule(db, id_chamber)
     if rule is None:
@@ -101,6 +99,7 @@ def update_rule(id_chamber: UUID, data: HaccpRuleUpdate, db: Session = Depends(g
 
     for field, value in data.model_dump().items():
         setattr(rule, field, value)
+    rule.id_user_modified = user.id_user
     rule.review_date = datetime.now(timezone.utc)
 
     db.commit()

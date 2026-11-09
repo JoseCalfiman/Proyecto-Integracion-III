@@ -1,4 +1,3 @@
-import os
 from time import time
 
 import bcrypt
@@ -7,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from auth import signing_key
 from database import get_db
 from models import Role, User
 from schemas import LoginRequest
@@ -28,10 +28,7 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
         valid = False
     if not valid:
         raise HTTPException(401, "Correo o contraseña incorrectos")
-    secret = os.getenv("JWT_SECRET", "")
-    if len(secret.encode()) < 32:
-        raise HTTPException(503, "Autenticación no configurada")
     token = jwt.encode({"sub": str(user.id_user), "email": user.email,
                         "role": user.role_name, "name": user.name,
-                        "exp": int(time()) + 3600}, secret, algorithm="HS256")
+                        "exp": int(time()) + 3600}, signing_key(), algorithm="HS256")
     return {"access_token": token, "token_type": "bearer"}

@@ -5,8 +5,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from auth import technician
 from database import get_db
-from models import AlertAudit, GeneratedAlert, User
+from models import AlertAudit, GeneratedAlert
 from schemas import AlertAction, AlertAuditRead, AlertRead
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -26,6 +27,7 @@ def _transition(
     required: str,
     new_status: str,
     data: AlertAction,
+    user_id: UUID,
 ) -> GeneratedAlert:
     """Cambia el estado de la alerta, guarda quién y cuándo, y registra la auditoría."""
     if alert.status != required:
@@ -33,22 +35,20 @@ def _transition(
             status.HTTP_409_CONFLICT,
             f"La alerta debe estar en estado '{required}' (estado actual: '{alert.status}')",
         )
-    if db.get(User, data.id_user) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuario no encontrado")
 
     now = datetime.now(timezone.utc)
     alert.status = new_status
     if new_status == "acknowledged":
-        alert.id_user_acknowledged = data.id_user
+        alert.id_user_acknowledged = user_id
         alert.acknowledgment_date = now
     else:
-        alert.id_user_resolved = data.id_user
+        alert.id_user_resolved = user_id
         alert.resolution_date = now
 
     db.add(
         AlertAudit(
             id_alert=alert.id_alert,
-            id_user=data.id_user,
+            id_user=user_id,
             action=new_status,
             detail=data.note or f"Alerta {new_status} por el usuario",
         )
@@ -58,7 +58,7 @@ def _transition(
     return alert
 
 
-# Permisos: técnico y gerente (TODO: agregar dependencia de auth cuando exista auth.py)
+# Permisos: técnico y gerente
 @router.get("", response_model=List[AlertRead])
 def list_alerts(
     id_chamber: Optional[UUID] = None,
@@ -106,15 +106,15 @@ def get_alert_audit(id_alert: int, db: Session = Depends(get_db)):
 
 # Permisos: solo técnico
 @router.put("/{id_alert}/acknowledge", response_model=AlertRead)
-def acknowledge_alert(id_alert: int, data: AlertAction, db: Session = Depends(get_db)):
+def acknowledge_alert(id_alert: int, data: AlertAction, user=Depends(technician), db: Session = Depends(get_db)):
     """Reconoce una alerta activa (active -> acknowledged)."""
     alert = _get_alert_or_404(db, id_alert)
-    return _transition(db, alert, "active", "acknowledged", data)
+    return _transition(db, alert, "active", "acknowledged", data, user.id_user)
 
 
 # Permisos: solo técnico
 @router.put("/{id_alert}/resolve", response_model=AlertRead)
-def resolve_alert(id_alert: int, data: AlertAction, db: Session = Depends(get_db)):
+def resolve_alert(id_alert: int, data: AlertAction, user=Depends(technician), db: Session = Depends(get_db)):
     """Resuelve una alerta ya reconocida (acknowledged -> resolved)."""
     alert = _get_alert_or_404(db, id_alert)
-    return _transition(db, alert, "acknowledged", "resolved", data)
+    return _transition(db, alert, "acknowledged", "resolved", data, user.id_user)

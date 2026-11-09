@@ -23,7 +23,7 @@ MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 
 
 # Elegir un par completo, sin mezclar credenciales de distintas cuentas.
-if os.getenv("MQTT_BROKER_USER"):
+if "MQTT_BROKER_USER" in os.environ:  # Vacío explícito: conectar sin credenciales.
     MQTT_BROKER_USER = os.getenv("MQTT_BROKER_USER")
     MQTT_BROKER_PASSWORD = os.getenv("MQTT_BROKER_PASSWORD", "")
 elif os.getenv("MQTT_INGESTA_USER"):
