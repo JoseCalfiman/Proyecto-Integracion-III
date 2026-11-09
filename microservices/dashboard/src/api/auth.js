@@ -1,19 +1,62 @@
+// lo que hace este archivo es la logica de autenticacion, es decir, las funciones que se encargan de
+// hacer las peticiones a la API para iniciar sesión, cerrar sesión y obtener el usuario actual.
+
 import apiClient from './client';
 
-export async function login(email, password) {
-  const { data } = await apiClient.post('/auth/login', { email, password });
-  return data.access_token;
-}
-
-export function getCurrentUser(token) {
+// LOGIN
+export const login = async (email, password) => {
   try {
-    const bytes = atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'));
-    const { sub, email, role, name, exp } = JSON.parse(
-      new TextDecoder().decode(Uint8Array.from(bytes, c => c.charCodeAt(0)))
+    const response = await apiClient.post('/auth/login', {
+      email,
+      password,
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.detail ||
+      error.response?.data?.message ||
+      'Error al iniciar sesión'
     );
-    if (!sub || !role || !(exp > Date.now() / 1000)) return null;
-    return { id: sub, email, rol: role, nombre: name };
-  } catch {
+  }
+};
+
+// LOGOUT
+export const logout = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+};
+
+// OBTENER USUARIO ACTUAL (decodifica el JWT)
+export const getCurrentUser = () => {
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+
+    const payload = JSON.parse(atob(token.split('.')[1]));
+
+    return {
+      id: payload.sub,
+      email: payload.email,
+      rol: payload.rol,
+      nombre: payload.nombre,
+    };
+  } catch (error) {
+    console.error('Error al decodificar el token:', error);
     return null;
   }
-}
+};
+
+// VERIFICAR SI EL USUARIO ESTÁ AUTENTICADO
+export const isAuthenticated = () => {
+  const token = localStorage.getItem('token');
+  if (!token) return false;
+
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const now = Date.now() / 1000;
+    return payload.exp > now;
+  } catch {
+    return false;
+  }
+};
+

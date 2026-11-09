@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, Literal
 from uuid import UUID
 
-from pydantic import SecretStr, AliasChoices, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 
@@ -141,8 +141,3 @@ class HaccpRuleRead(BaseModel):
     active: bool
     review_date: Optional[datetime] = None
     id_user_modified: Optional[UUID] = None
-
-
-class LoginRequest(BaseModel):
-    email: str = Field(max_length=150)
-    password: SecretStr

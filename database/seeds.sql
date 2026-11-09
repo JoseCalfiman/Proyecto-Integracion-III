@@ -29,7 +29,7 @@ VALUES
     '11111111-1111-1111-1111-111111111111',
     1,
     'gerente@cryometric.cl',
-    '$2b$12$cRSVUq5.zBbHsN.lo3t9KOG1x/LpvGS4ioPZNAki1OVsX3TkL5b82',
+    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYqVr/if1Hy',
     'Carlos Mendoza',
     TRUE
   ),
@@ -38,7 +38,7 @@ VALUES
     '11111111-1111-1111-1111-111111111111',
     2,
     'tecnico@cryometric.cl',
-    '$2b$12$Iti7CZ5WMN12GknAoCW0buEC1u.gIY68rzzQbYf7J4nNFWUj0tK3G',
+    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYqVr/if1Hy',
     'Ana Martínez',
     TRUE
   );

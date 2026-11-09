@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import threading
 
-from routes import auth, chambers, alerts, haccp, dashboard, historial
+from routes import chambers, alerts, haccp, dashboard, historial
 from mqtt_client import start as start_mqtt  # ← Importar el cliente MQTT
 from readiness import ready
 
@@ -19,7 +19,6 @@ app.add_middleware(
 )
 
 # Routers
-app.include_router(auth.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
 app.include_router(haccp.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
