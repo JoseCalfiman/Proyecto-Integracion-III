@@ -2,7 +2,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 logger = logging.getLogger("system-controller")
 
@@ -12,10 +12,18 @@ RESTART_ANNOTATION = "kubectl.kubernetes.io/restartedAt"
 
 
 @dataclass(frozen=True)
+class PodTarget:
+    """Un pod en ejecución que se puede consultar por HTTP (sin exponer su IP en la API)."""
+    name: str
+    ip: str
+
+
+@dataclass(frozen=True)
 class WorkloadInfo:
     desired: int
     ready: int
-    restarts: Optional[int]  
+    restarts: Optional[int]
+    pods: Tuple[PodTarget, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -78,9 +86,10 @@ class KubernetesManager:
             name, self.namespace, _request_timeout=REQUEST_TIMEOUT_SECONDS
         )
 
-    def _count_restarts(self, match_labels: dict) -> Optional[int]:
+    def _inspect_pods(self, match_labels: dict) -> Tuple[Optional[int], Tuple[PodTarget, ...]]:
+        """Una sola consulta de pods: suma de restarts y pods Running con IP (para medir latencia)."""
         if not match_labels:
-            return None
+            return None, ()
         selector = ",".join(f"{k}={v}" for k, v in match_labels.items())
         try:
             pods = self._core.list_namespaced_pod(
@@ -90,12 +99,22 @@ class KubernetesManager:
             )
         except Exception as exc:
             logger.warning("No se pudieron listar los pods de '%s': %s", selector, exc)
-            return None
+            return None, ()
         total = 0
+        targets = []
         for pod in pods.items:
             for cs in pod.status.container_statuses or []:
                 total += cs.restart_count or 0
-        return total
+            meta = getattr(pod, "metadata", None)
+            terminating = getattr(meta, "deletion_timestamp", None) is not None
+            phase = getattr(pod.status, "phase", None)
+            ip = getattr(pod.status, "pod_ip", None)
+            if phase == "Running" and ip and not terminating:
+                targets.append(PodTarget(name=getattr(meta, "name", "") or "", ip=ip))
+        return total, tuple(targets)
+
+    def _count_restarts(self, match_labels: dict) -> Optional[int]:
+        return self._inspect_pods(match_labels)[0]
 
     def get_workload_status(self, name: str, kind: str = "Deployment") -> Optional[WorkloadInfo]:
         if not self.available:
@@ -117,7 +136,8 @@ class KubernetesManager:
             desired = workload.spec.replicas if workload.spec.replicas is not None else 1
             ready = workload.status.ready_replicas or 0
             match_labels = (workload.spec.selector.match_labels or {}) if workload.spec.selector else {}
-            return WorkloadInfo(desired=desired, ready=ready, restarts=self._count_restarts(match_labels))
+            restarts, pods = self._inspect_pods(match_labels)
+            return WorkloadInfo(desired=desired, ready=ready, restarts=restarts, pods=pods)
         logger.warning("Workload '%s' no encontrado en el namespace '%s'", name, self.namespace)
         return None
 

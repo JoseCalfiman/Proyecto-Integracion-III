@@ -30,6 +30,9 @@ class Component:
     kind: str = "Deployment"
     check: Optional[Callable[[], Awaitable[CheckResult]]] = None
     timeout: float = 3.0  
+    # Si no hay URL de salud, se mide cada pod por su IP (puerto y ruta) usando la API de Kubernetes.
+    pod_health_port: Optional[int] = None
+    pod_health_path: str = "/health"
 
 
 def _now() -> datetime:
@@ -56,6 +59,24 @@ async def check_http(url: str, timeout: float) -> CheckResult:
     latency = _elapsed_ms(start)
     detail = f"HTTP {response.status_code} en {path}"
     return CheckResult(True, response.is_success, latency, detail)
+
+
+async def check_pods_http(pods: Sequence, port: int, path: str, timeout: float) -> CheckResult:
+    """Consulta /health de cada pod en paralelo. Latencia = la del pod más lento (peor caso).
+    El detalle nunca incluye IPs ni nombres de host internos."""
+    if not pods:
+        return CheckResult(False, False, None, "Sin pods en ejecución para consultar")
+    results = await asyncio.gather(*(check_http(f"http://{p.ip}:{port}{path}", timeout) for p in pods))
+    total = len(results)
+    healthy = sum(1 for r in results if r.ok)
+    latencies = [r.latency_ms for r in results if r.latency_ms is not None]
+    worst = max(latencies) if latencies else None
+    if healthy == total:
+        return CheckResult(True, True, worst, f"{results[0].detail} ({healthy}/{total} pods)")
+    if not any(r.reachable for r in results):
+        return CheckResult(False, False, None, f"{total} pods sin respuesta en {path}: {results[0].detail}")
+    bad = next(r for r in results if not r.ok)
+    return CheckResult(True, False, worst, f"{healthy}/{total} pods saludables en {path}: {bad.detail}")
 
 
 async def check_tcp(host: str, port: int, timeout: float) -> CheckResult:
@@ -156,6 +177,20 @@ async def _run_probes(component: Component, k8s) -> Tuple[Optional[CheckResult],
     if isinstance(workload, BaseException):
         logger.warning("Lectura de Kubernetes falló para '%s': %s", component.name, workload)
         workload = None
+    # Sin URL de salud: medir cada pod por su IP (Kubernetes ya nos dijo cuáles son).
+    if (
+        check_res is None
+        and component.pod_health_port
+        and workload is not None
+        and getattr(workload, "pods", ())
+    ):
+        try:
+            check_res = await check_pods_http(
+                workload.pods, component.pod_health_port, component.pod_health_path, 2.0
+            )
+        except Exception:
+            logger.exception("El chequeo por pods de '%s' lanzó una excepción", component.name)
+            check_res = CheckResult(True, False, None, "Error interno al consultar los pods")
     return check_res, workload
 
 

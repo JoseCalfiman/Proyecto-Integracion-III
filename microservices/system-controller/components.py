@@ -27,9 +27,16 @@ def _http_check(url: str, timeout: float) -> Callable[[], Awaitable[CheckResult]
     return _check
 
 
+def _health_port(env_name: str, default: int) -> int:
+    try:
+        return int(os.getenv(env_name, default))
+    except ValueError:
+        return default
+
+
 def _optional_http_check(env_name: str, timeout: float = 2.0) -> Optional[Callable[[], Awaitable[CheckResult]]]:
-    """Los workers hoy no tienen servidor HTTP. Si algún día exponen /health,
-    basta con definir la variable (ej. WORKER_PREDICTIVO_HEALTH_URL) y se usa."""
+    """Si la variable existe (ej. WORKER_PREDICTIVO_HEALTH_URL) se usa esa URL.
+    Si no, el Controller mide cada pod directamente por su IP (ver pod_health_port)."""
     url = os.getenv(env_name)
     return _http_check(url, timeout) if url else None
 
@@ -38,11 +45,14 @@ COMPONENTS = [
     Component("ingesta", "microservice", critical=True, restartable="ingesta" in RESTART_ALLOWLIST,
               check=_http_check(INGESTA_URL, 2.0), timeout=2.0),
     Component("worker-predictivo", "worker", restartable="worker-predictivo" in RESTART_ALLOWLIST,
-              check=_optional_http_check("WORKER_PREDICTIVO_HEALTH_URL")),
+              check=_optional_http_check("WORKER_PREDICTIVO_HEALTH_URL"), timeout=5.0,
+              pod_health_port=_health_port("WORKER_PREDICTIVO_HEALTH_PORT", 8000)),
     Component("worker-haccp", "worker", restartable="worker-haccp" in RESTART_ALLOWLIST,
-              check=_optional_http_check("WORKER_HACCP_HEALTH_URL")),
+              check=_optional_http_check("WORKER_HACCP_HEALTH_URL"), timeout=5.0,
+              pod_health_port=_health_port("WORKER_HACCP_HEALTH_PORT", 8080)),
     Component("worker-optimizacion", "worker", restartable="worker-optimizacion" in RESTART_ALLOWLIST,
-              check=_optional_http_check("WORKER_OPTIMIZACION_HEALTH_URL")),
+              check=_optional_http_check("WORKER_OPTIMIZACION_HEALTH_URL"), timeout=5.0,
+              pod_health_port=_health_port("WORKER_OPTIMIZACION_HEALTH_PORT", 8080)),
     Component("dashboard", "frontend", restartable="dashboard" in RESTART_ALLOWLIST,
               check=_http_check(DASHBOARD_URL, 2.0), timeout=2.0),
     Component("kafka", "infra", critical=True, restartable="kafka" in RESTART_ALLOWLIST,

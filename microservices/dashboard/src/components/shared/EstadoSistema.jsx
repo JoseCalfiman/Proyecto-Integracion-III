@@ -17,6 +17,20 @@ const STATUS = {
 const statusOf = (s) =>
   STATUS[s] || { color: "gray", label: s || "—", dot: "bg-gray-400" };
 
+const TYPE_LABEL = {
+  microservice: "Microservicio",
+  worker: "Worker",
+  frontend: "Frontend",
+  infra: "Infraestructura",
+};
+
+// Dato que el Controller no pudo obtener: se dice explícitamente y se explica el motivo.
+const NoData = ({ why }) => (
+  <span className="text-gray-400" title={why}>
+    N/D
+  </span>
+);
+
 const EstadoSistema = () => {
   const [fastUntil, setFastUntil] = useState(0);
   const [fast, setFast] = useState(false);
@@ -160,28 +174,55 @@ const EstadoSistema = () => {
                         className={`inline-block w-2 h-2 rounded-full mr-2 ${st.dot}`}
                       />
                       {c.name}
+                      <span className="block ml-4 text-xs font-normal text-gray-400">
+                        {TYPE_LABEL[c.type] || c.type}
+                      </span>
                     </td>
                     <td className="py-3 pr-4">
                       <Badge color={st.color}>{st.label}</Badge>
                     </td>
                     <td className="py-3 pr-4 text-gray-600">
-                      {c.latency_ms != null
-                        ? `${Math.round(c.latency_ms)} ms`
-                        : "—"}
+                      {c.latency_ms != null ? (
+                        `${Math.round(c.latency_ms)} ms`
+                      ) : (
+                        <NoData why="El Controller no pudo medir la latencia (el componente no respondió o no tiene chequeo)" />
+                      )}
                     </td>
                     <td className="py-3 pr-4 text-gray-600">
-                      {c.replicas
-                        ? `${c.replicas.ready ?? 0}/${c.replicas.desired ?? 0}`
-                        : "—"}
+                      {c.replicas ? (
+                        <span
+                          className={
+                            c.replicas.ready < c.replicas.desired
+                              ? "font-semibold text-red-600"
+                              : ""
+                          }
+                          title="Réplicas listas / deseadas"
+                        >
+                          {c.replicas.ready}/{c.replicas.desired}
+                        </span>
+                      ) : (
+                        <NoData why="Sin acceso a la API de Kubernetes (por ejemplo, en Docker Compose)" />
+                      )}
                     </td>
                     <td className="py-3 pr-4 text-gray-600">
-                      {c.restarts ?? "—"}
+                      {c.restarts != null ? (
+                        <span
+                          className={
+                            c.restarts > 0 ? "font-semibold text-amber-600" : ""
+                          }
+                          title="Reinicios acumulados de los contenedores"
+                        >
+                          {c.restarts}
+                        </span>
+                      ) : (
+                        <NoData why="Sin acceso a la API de Kubernetes (por ejemplo, en Docker Compose)" />
+                      )}
                     </td>
                     <td
-                      className="py-3 pr-4 text-gray-500 max-w-xs truncate"
+                      className="py-3 pr-4 text-gray-600 min-w-[16rem] whitespace-normal break-words"
                       title={c.detail || ""}
                     >
-                      {c.detail || "—"}
+                      {c.detail || "Sin detalle"}
                     </td>
                     <td className="py-3 text-right">
                       {c.restartable ? (
