@@ -10,6 +10,13 @@ NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 REQUEST_TIMEOUT_SECONDS = 3
 RESTART_ANNOTATION = "kubectl.kubernetes.io/restartedAt"
 
+# SEGURIDAD: lo único que este servicio puede reiniciar, pase lo que pase.
+# Ni la variable RESTART_ALLOWLIST ni un cambio en components.py pueden ampliarlo.
+# Debe coincidir con los resourceNames del permiso "patch" en k8s/system-controller/rbac.yaml.
+RESTARTABLE_WORKLOADS = frozenset(
+    {"ingesta", "worker-predictivo", "worker-haccp", "worker-optimizacion"}
+)
+
 
 @dataclass(frozen=True)
 class PodTarget:
@@ -30,6 +37,16 @@ class WorkloadInfo:
 class RestartOutcome:
     kind: str 
     requested_at: datetime  
+
+@dataclass(frozen=True)
+class RolloutInfo:
+    phase: str  
+    desired: int
+    updated: int
+    ready: int
+    available: int
+    message: str
+
 
 class RestartError(Exception):
     def __init__(self, reason: str, message: str):
@@ -155,7 +172,44 @@ class KubernetesManager:
         if release:
             release()
 
+    def get_rollout_status(self, name: str) -> RolloutInfo:
+        """Avance del reinicio: compara réplicas actualizadas/listas con las deseadas."""
+        if name not in RESTARTABLE_WORKLOADS:
+            raise RestartError("not_allowed", f"'{name}' no está autorizado")
+        if not self.available:
+            raise RestartError("unavailable", "Sin acceso a la API de Kubernetes")
+        from kubernetes.client.rest import ApiException
+
+        for k in ("Deployment", "StatefulSet"):
+            try:
+                w = self._read_workload(k, name)
+            except ApiException as exc:
+                if exc.status == 404:
+                    continue
+                raise RestartError("failed", f"La API de Kubernetes respondió HTTP {exc.status}") from None
+            except Exception:
+                raise RestartError("failed", "No se pudo contactar la API de Kubernetes") from None
+            desired = w.spec.replicas if w.spec.replicas is not None else 1
+            st = w.status
+            updated = getattr(st, "updated_replicas", None) or 0
+            ready = getattr(st, "ready_replicas", None) or 0
+            total = getattr(st, "replicas", None) or 0
+            available = getattr(st, "available_replicas", None) or 0
+            generation = getattr(getattr(w, "metadata", None), "generation", None)
+            observed = getattr(st, "observed_generation", None)
+            seen = generation is None or observed is None or observed >= generation
+            done = seen and updated >= desired and ready >= desired and total <= desired
+            if done:
+                return RolloutInfo("COMPLETE", desired, updated, ready, available,
+                                   f"Reinicio completado: {ready}/{desired} réplicas listas")
+            return RolloutInfo("IN_PROGRESS", desired, updated, ready, available,
+                               f"Reiniciando: {updated}/{desired} actualizadas, {ready}/{desired} listas")
+        raise RestartError("not_found", f"El workload '{name}' no existe en el namespace '{self.namespace}'")
+
     def restart_workload(self, name: str, kind: str = "Deployment") -> RestartOutcome:
+        if name not in RESTARTABLE_WORKLOADS:
+            logger.warning("Reinicio bloqueado por el tope de seguridad: '%s'", name)
+            raise RestartError("not_allowed", f"'{name}' no está autorizado para reinicio")
         if not self.available:
             raise RestartError("unavailable", "Sin acceso a la API de Kubernetes")
         from kubernetes.client.rest import ApiException

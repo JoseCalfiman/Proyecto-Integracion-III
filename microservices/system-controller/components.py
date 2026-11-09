@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Awaitable, Callable, Optional
 
@@ -5,19 +6,25 @@ import database_checker
 import kafka_checker
 import mqtt_checker
 from health_checker import CheckResult, Component, check_http
+from kubernetes_manager import RESTARTABLE_WORKLOADS
 
 INGESTA_URL = os.getenv("INGESTA_URL", "http://ingesta-service:8000/health")
 DASHBOARD_URL = os.getenv("DASHBOARD_URL", "http://dashboard-service:80/")
 LATENCY_THRESHOLD_MS = int(os.getenv("LATENCY_THRESHOLD_MS", "1000"))
 
 # Lista separada por comas. Si no se define, se usan los valores del contrato.
+# lista NUNCA puede superar el tope RESTARTABLE_WORKLOADS 
 _ALLOWLIST_ENV = os.getenv("RESTART_ALLOWLIST")
-_DEFAULT_RESTARTABLE = {"ingesta", "worker-predictivo", "worker-haccp", "worker-optimizacion"}
-RESTART_ALLOWLIST = (
+_requested = (
     {n.strip() for n in _ALLOWLIST_ENV.split(",") if n.strip()}
     if _ALLOWLIST_ENV is not None
-    else _DEFAULT_RESTARTABLE
+    else set(RESTARTABLE_WORKLOADS)
 )
+RESTART_ALLOWLIST = _requested & RESTARTABLE_WORKLOADS
+if _requested - RESTART_ALLOWLIST:
+    logging.getLogger("system-controller").warning(
+        "RESTART_ALLOWLIST: se ignoran por seguridad %s", sorted(_requested - RESTART_ALLOWLIST)
+    )
 
 
 def _http_check(url: str, timeout: float) -> Callable[[], Awaitable[CheckResult]]:

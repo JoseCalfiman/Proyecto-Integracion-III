@@ -51,3 +51,13 @@ class RestartResponse(BaseModel):
     status: str = "RESTART_REQUESTED"
     requested_at: datetime
     message: str = "Reinicio solicitado. El estado se actualizará en /api/v1/system/status."
+
+
+class RolloutResponse(BaseModel):
+    name: str
+    phase: str  
+    desired: int
+    updated: int
+    ready: int
+    available: int
+    message: str
