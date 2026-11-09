@@ -1,0 +1,80 @@
+# Antes de re-aplicarlo:
+# kubectl delete job kafka-topics -n student-aamonsalve --ignore-not-found
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topics
+  namespace: student-aamonsalve
+
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 600
+
+  template:
+    spec:
+      restartPolicy: OnFailure
+
+      containers:
+        - name: create-topics
+          image: apache/kafka:latest
+
+          env:
+          - name: KAFKA_HEAP_OPTS
+            value: "-Xms32M -Xmx64M"
+
+          command:
+            - /bin/bash
+            - -c
+
+          args:
+            - |
+              set -e
+
+              BS=kafka-service:9092
+
+              echo "Esperando a que Kafka esté disponible..."
+
+              until /opt/kafka/bin/kafka-broker-api-versions.sh \
+                --bootstrap-server "$BS" >/dev/null 2>&1; do
+                echo "Kafka aún no responde, reintentando en 5 s..."
+                sleep 5
+              done
+
+              echo "Kafka disponible."
+
+              echo "Creando/verificando sensor.raw con 3 particiones..."
+
+              /opt/kafka/bin/kafka-topics.sh \
+                --bootstrap-server "$BS" \
+                --create \
+                --if-not-exists \
+                --topic sensor.raw \
+                --partitions 3 \
+                --replication-factor 1
+
+              echo "Tópico sensor.raw listo."
+
+              echo "Creando/verificando tópicos auxiliares..."
+
+              for T in sensor.anomaly haccp.alerts optimization.reports; do
+                /opt/kafka/bin/kafka-topics.sh \
+                  --bootstrap-server "$BS" \
+                  --create \
+                  --if-not-exists \
+                  --topic "$T" \
+                  --partitions 1 \
+                  --replication-factor 1
+
+                echo "Tópico $T listo."
+              done
+
+              echo "Todos los tópicos Kafka están listos."
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"

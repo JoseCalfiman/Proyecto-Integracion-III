@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -146,6 +146,16 @@ class SavingRecommendation(Base):
     applied_at = Column(DateTime(timezone=True))
 
 
+class PredictedConsumption(Base):
+    __tablename__ = "predicted_consumption"
+
+    id_consumption_prediction = Column(BigInteger, primary_key=True, autoincrement=True)
+    id_chamber = Column(UUID(as_uuid=True), ForeignKey("chambers.id_chamber"))
+    prediction_date = Column(Date)
+    predicted_consumption_kw = Column(Numeric(8, 3))
+    generation_date = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class EnergyPrice(Base):
     __tablename__ = "energy_price"
 
@@ -168,3 +178,60 @@ class Prediction(Base):
     id_worker = Column(String(50))
 
     chamber = relationship("Chamber", lazy="joined")
+
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id_conversation = Column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+    id_user = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id_user"),
+        nullable=True,
+    )
+    id_chamber = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chambers.id_chamber"),
+        nullable=True,
+    )
+    start_date = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    last_activity_date = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    end_date = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
+class AiMessage(Base):
+    __tablename__ = "ai_messages"
+
+    id_message = Column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+    id_conversation = Column(
+        BigInteger,
+        ForeignKey("conversations.id_conversation"),
+        nullable=False,
+    )
+    sender = Column( # el sender es el usuario o el sistema, en este caso es el sistema,
+        String(20),
+        nullable=False,
+    )
+    content = Column(Text) # content es el mensaje enviado
+    sent_date = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )

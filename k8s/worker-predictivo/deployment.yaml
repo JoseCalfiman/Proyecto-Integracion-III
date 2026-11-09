@@ -29,13 +29,36 @@ spec:
       containers:
       - name: worker-predictivo
         image: aamonsalve/cryometric-worker-predictivo:latest
+        ports:
+        - containerPort: 8000
+
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+          failureThreshold: 30
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+
         envFrom:
         - configMapRef:
             name: app-config
         resources:
           requests:
-            memory: "128Mi"
             cpu: "50m"
+            memory: "64Mi"
           limits:
-            memory: "256Mi"
-            cpu: "100m"
+            memory: "128Mi"
+            cpu: "150m"

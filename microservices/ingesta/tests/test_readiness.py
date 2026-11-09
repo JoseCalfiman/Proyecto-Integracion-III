@@ -18,6 +18,14 @@ with patch("confluent_kafka.Producer"), patch("dotenv.load_dotenv"):
 
 
 class ReadinessTests(unittest.TestCase):
+    def test_probe_engine_is_created_lazily_and_reused(self):
+        engine = object()
+        with patch.object(readiness, "probe_engine", None), \
+                patch.object(readiness, "create_engine", return_value=engine) as create:
+            self.assertIs(readiness.get_probe_engine(), engine)
+            self.assertIs(readiness.get_probe_engine(), engine)
+        create.assert_called_once()
+
     def test_dependency_states_and_recovery(self):
         for db_ok, kafka_ok in ((True, True), (False, True), (True, False), (False, False)):
             with self.subTest(db=db_ok, kafka=kafka_ok), \

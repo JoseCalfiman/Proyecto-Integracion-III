@@ -13,8 +13,15 @@ from schemas import SensorDataCreate
 
 load_dotenv()
 
-MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "mosquitto")
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST")
+
+if not MQTT_BROKER_HOST:
+    raise RuntimeError("MQTT_BROKER_HOST no está configurado")
+
+
 MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+
+
 # Elegir un par completo, sin mezclar credenciales de distintas cuentas.
 if os.getenv("MQTT_BROKER_USER"):
     MQTT_BROKER_USER = os.getenv("MQTT_BROKER_USER")

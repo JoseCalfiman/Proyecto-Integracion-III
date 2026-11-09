@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional, Union
-from sklearn.linear_model import LinearRegression
+
 import numpy as np
 
 TimestampLike = Union[datetime, float, int]
@@ -28,17 +28,19 @@ def calcular_pendiente(
     if len(temperaturas) < 2:
         return None
 
-    segundos = _timestamps_a_segundos(timestamps)
-    X = segundos.reshape(-1, 1)
-    y = np.array(temperaturas, dtype=float)
+    seconds = _timestamps_a_segundos(timestamps)
+    values = np.asarray(temperaturas, dtype=float)
+    if not np.isfinite(seconds).all() or not np.isfinite(values).all():
+        return None
 
-    modelo = LinearRegression()
-    modelo.fit(X, y)
+    centered_seconds = seconds - seconds.mean()
+    variance = np.dot(centered_seconds, centered_seconds)
+    if variance == 0:
+        return 0.0
 
-    pendiente_por_segundo = modelo.coef_[0]
-    pendiente_por_minuto = pendiente_por_segundo * 60.0
-
-    return float(pendiente_por_minuto)
+    centered_values = values - values.mean()
+    slope_per_second = np.dot(centered_seconds, centered_values) / variance
+    return float(slope_per_second * 60.0)
 
 def estimar_tiempo_restante(
     temperatura_actual: float,
@@ -110,17 +112,24 @@ def evaluar_riesgo(
     }
 
 
-# Bloque de prueba (ejecutar directamente para validar)
 if __name__ == "__main__":
-    ejemplo_timestamps = [0, 60, 120, 180, 240, 300]
-    ejemplo_temperaturas = [-18.0, -17.5, -17.0, -16.6, -16.1, -15.5]
+    timestamps_test = [0, 60, 120, 180] # segundos
+    temps_test = [20.0, 21.0, 22.0, 23.0]
 
-    pendiente = calcular_pendiente(ejemplo_timestamps, ejemplo_temperaturas)
-    print(f"Pendiente: {pendiente:.3f} °C/min")
+    pendiente_val = calcular_pendiente(timestamps_test, temps_test)
+    print(f"Pendiente calculada: {pendiente_val:.2f} °C/min (Esperada: 1.0)")
+    assert abs(pendiente_val - 1.0) < 1e-5, "Error en el cálculo de la pendiente"
 
-    tiempo_restante = estimar_tiempo_restante(
-        temperatura_actual=ejemplo_temperaturas[-1],
-        absolute_max_temp=-10.0,
-        pendiente_por_minuto=pendiente,
+    limite_haccp = 28.0
+    tiempo_val = estimar_tiempo_restante(
+        temperatura_actual=temps_test[-1],
+        absolute_max_temp=limite_haccp,
+        pendiente_por_minuto=pendiente_val,
     )
-    print(f"Tiempo restante estimado: {tiempo_restante:.1f} min")
+    print(f"Tiempo restante estimado: {tiempo_val:.1f} min (Esperado: 5.0)")
+    assert abs(tiempo_val - 5.0) < 1e-5, "Error en el cálculo del tiempo restante"
+
+    riesgo_val = determinar_nivel_riesgo(tiempo_val, umbral_alerta_minutos=40.0)
+    print(f"Nivel de riesgo determinado: {riesgo_val}")
+    
+    print("Validación de regresión y tiempo restante superada con éxito")
