@@ -1,25 +1,16 @@
 import React from 'react';
+import { useFetch } from '../../hooks/useApi';
+import { getForecast } from '../../api/optimizacion';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 
 const ConsumptionForecastChart = () => {
-  // Datos de ejemplo: histórico + pronóstico
-    // datos viene desde el padre (Ahorro.jsx)
-  const data = [
-    { date: 'Oct 2', historico: 450, pronostico: null },
-    { date: 'Oct 3', historico: 420, pronostico: null },
-    { date: 'Oct 4', historico: 480, pronostico: null },
-    { date: 'Oct 5', historico: 420, pronostico: null },
-    { date: 'Oct 6', historico: 380, pronostico: null },
-    { date: 'Oct 7', historico: 375, pronostico: 375 },
-    { date: 'Oct 8', historico: null, pronostico: 360 },
-    { date: 'Oct 9', historico: null, pronostico: 340 },
-    { date: 'Oct 10', historico: null, pronostico: 320 },
-    { date: 'Oct 11', historico: null, pronostico: 310 },
-    { date: 'Oct 12', historico: null, pronostico: 300 },
-    { date: 'Oct 13', historico: null, pronostico: 280 },
-  ];
+  const { data, loading, error } = useFetch(getForecast);
+
+  if (loading) return <p className="text-sm text-gray-500">Cargando pronóstico...</p>;
+  if (error) return <p role="alert" className="text-sm text-red-600">{error}</p>;
+  if (!data?.length) return <p className="text-sm text-gray-500">Aún no hay pronósticos disponibles.</p>;
 
   return (
     <ResponsiveContainer width="100%" height={280}>

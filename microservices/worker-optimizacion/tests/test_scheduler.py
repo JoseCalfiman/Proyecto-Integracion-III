@@ -127,6 +127,9 @@ def test_optimization_pipeline_persists_clp_recommendations_before_kafka(monkeyp
         def execute(self, sql, params=None):
             statements.append((sql, params))
 
+        def fetchall(self):
+            return []
+
         def executemany(self, sql, params=None):
             statements.append((sql, params))
 

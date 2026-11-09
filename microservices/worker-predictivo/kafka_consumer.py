@@ -1,7 +1,11 @@
 import json
+import time
 import logging
+import threading
 from collections import defaultdict, deque
 from confluent_kafka import Consumer, Producer, KafkaError
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
 from config import (
     BOOTSTRAP_SERVERS, GROUP_ID, AUTO_OFFSET_RESET,
     TOPIC_RAW, TOPIC_ANOMALY, LIMITE_HACCP_DEFAULT,
@@ -13,7 +17,32 @@ from window import actualizar_ventana
 from db import get_session
 from haccp_predictions import obtener_regla_haccp_activa, guardar_prediccion
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+RISK_LEVEL_DB = {
+    "SIN_RIESGO": "SIN_RIESGO",
+    "BAJO": "BAJO",
+    "MEDIO": "MEDIO",
+    "ALTO": "ALTO",
+    "CRITICO": "CRITICO",
+    "CRÍTICO": "CRITICO",
+}
+
+def mapear_risk_level(nivel_riesgo):
+    """Normaliza el nivel de riesgo al vocabulario permitido por predictions."""
+    nivel = RISK_LEVEL_DB.get(str(nivel_riesgo).upper())
+
+    if nivel is None:
+        logging.warning(
+            f"Nivel de riesgo desconocido '{nivel_riesgo}', "
+            f"se guarda como 'SIN_RIESGO'"
+        )
+        return "SIN_RIESGO"
+
+    return nivel
 
 class PredictiveKafkaWorker:
     def __init__(self):
@@ -38,7 +67,7 @@ class PredictiveKafkaWorker:
     def send_anomaly_alert(self, alert_payload):
         self.producer.produce(
             TOPIC_ANOMALY,
-            key=str(alert_payload.get("chamber_id")),
+            key=str(alert_payload.get("id_chamber")),
             value=json.dumps(alert_payload),
             callback=self.delivery_report,
         )
@@ -53,37 +82,54 @@ class PredictiveKafkaWorker:
         try:
             data = json.loads(msg.value().decode("utf-8"))
             lectura = parse_sensor_reading(data)
+
         except (ValueError, UnicodeDecodeError, ContractError) as e:
-            # json.JSONDecodeError y ContractError son subclases de ValueError
             logging.warning(f"Mensaje descartado en {msg.topic()} [{msg.partition()}]: {e}")
             return
 
         id_chamber = lectura.id_chamber
         timestamp = lectura.timestamp
         temperature = lectura.temperature
+
         logging.debug(f"Lectura recibida: {lectura}")
 
-        buffer, agregado = self._actualizar_buffer(id_chamber, timestamp, temperature)
+        buffer, agregado = self._actualizar_buffer(
+            id_chamber,
+            timestamp,
+            temperature,
+        )
+
         if not agregado:
-            logging.debug(f"[{id_chamber}] lectura repetida o desordenada, se ignora")
+            logging.debug(
+                f"[{id_chamber}] lectura repetida o desordenada, se ignora"
+            )
             return
 
+        prediction_id = None
+
         with get_session() as session:
-            regla = obtener_regla_haccp_activa(session, chamber_id=id_chamber)
+            regla = obtener_regla_haccp_activa(
+                session,
+                chamber_id=id_chamber,
+            )
 
             if regla is not None:
                 absolute_max_temp = regla["max_absolute_temp"]
+
                 umbral_alerta = (
                     regla["tolerance_time_min"]
                     if regla["tolerance_time_min"] is not None
                     else UMBRAL_ALERTA_MINUTOS
                 )
+
                 severity = regla["severity"]
+
             else:
                 logging.warning(
                     f"Sin regla HACCP activa para id_chamber={id_chamber}; "
                     f"usando valores por defecto de config.py"
                 )
+
                 absolute_max_temp = LIMITE_HACCP_DEFAULT
                 umbral_alerta = UMBRAL_ALERTA_MINUTOS
                 severity = SEVERITY_DEFAULT
@@ -95,32 +141,46 @@ class PredictiveKafkaWorker:
             )
 
             logging.info(
-                f"[{id_chamber}] pendiente={resultado['pendiente_por_minuto']} "
+                f"[{id_chamber}] "
+                f"pendiente={resultado['pendiente_por_minuto']} "
                 f"tiempo_restante_min={resultado['tiempo_restante_min']} "
                 f"nivel_riesgo={resultado['nivel_riesgo']}"
             )
+
             projected_temperature = (
                 absolute_max_temp
                 if resultado["tiempo_restante_min"] is not None
                 else None
             )
 
+            prediction_id = None
             try:
-                guardar_prediccion(
+                prediccion_obj = guardar_prediccion(
                     session,
                     chamber_id=id_chamber,
                     calculated_slope=resultado["pendiente_por_minuto"],
                     projected_temperature=projected_temperature,
                     remaining_time_min=resultado["tiempo_restante_min"],
-                    risk_level=resultado["nivel_riesgo"],
+                    risk_level=mapear_risk_level(resultado["nivel_riesgo"]),
                 )
+                prediction_id = prediccion_obj.id_prediction
             except Exception:
-                logging.exception(f"No se pudo guardar la predicción para {id_chamber}")
+                logging.exception(
+                    f"No se pudo guardar la predicción para {id_chamber}"
+                )
                 session.rollback()
 
         if resultado["hay_riesgo"]:
+            if prediction_id is None:
+                logging.warning(
+                    f"[{id_chamber}] Hay riesgo, pero no se pudo obtener "
+                    f"id_prediction. No se publica sensor.anomaly."
+                )
+                return
+
             alert_payload = {
-                "chamber_id": id_chamber,
+                "id_prediction": prediction_id,
+                "id_chamber": id_chamber,
                 "remaining_time_min": resultado["tiempo_restante_min"],
                 "temperature": temperature,
                 "severity": severity,
@@ -128,6 +188,12 @@ class PredictiveKafkaWorker:
                 "slope_per_minute": resultado["pendiente_por_minuto"],
                 "recorded_at": timestamp.isoformat(),
             }
+
+            logging.info(
+                f"[{id_chamber}] Publicando anomalía "
+                f"id_prediction={prediction_id}"
+            ) 
+
             self.send_anomaly_alert(alert_payload)
 
     def start_listening(self):
@@ -148,17 +214,9 @@ class PredictiveKafkaWorker:
                 try:
                     self._procesar_mensaje(msg)
                 except Exception:
-                    # Un mensaje problemático no debe tumbar el worker.
                     logging.exception("Error procesando mensaje; se continúa con el siguiente")
 
         except KeyboardInterrupt:
             logging.info("Deteniendo el consumidor...")
         finally:
             self.consumer.close()
-
-if __name__ == "__main__":
-    from db import crear_tablas
-
-    crear_tablas()
-    worker = PredictiveKafkaWorker()
-    worker.start_listening()

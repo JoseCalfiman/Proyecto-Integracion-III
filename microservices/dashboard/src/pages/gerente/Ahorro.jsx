@@ -53,6 +53,107 @@ const iconoConfig = {
   zap: Zap,
 };
 
+
+// ============================================================
+// FORMATEO DE RECOMENDACIONES REALES
+// ============================================================
+
+const accionConfig = {
+  reducir_carga: 'Reducir carga',
+  apagar: 'Apagar equipo',
+  encender: 'Encender equipo',
+  mantener: 'Mantener operación',
+};
+
+const equipoConfig = {
+  eq_climatizacion_zona_b: 'Climatización Zona B',
+  camaras_2_y_3: 'Cámaras 2 y 3',
+};
+
+const formatTextoTecnico = (valor) => {
+  if (!valor) return 'No especificado';
+
+  return String(valor)
+    .replace(/^eq_/, '')
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (letra) => letra.toUpperCase());
+};
+
+const formatAccion = (accion) => {
+  return accionConfig[accion] || formatTextoTecnico(accion);
+};
+
+const formatEquipo = (equipo) => {
+  return equipoConfig[equipo] || formatTextoTecnico(equipo);
+};
+
+const parseDescripcionRecomendacion = (descripcion) => {
+  if (!descripcion) return null;
+
+  if (typeof descripcion === 'object' && !Array.isArray(descripcion)) {
+    return descripcion;
+  }
+
+  if (typeof descripcion !== 'string') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(descripcion);
+
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed)
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Si no es JSON, se muestra como descripción normal.
+  }
+
+  return null;
+};
+
+const formatFecha = (fecha) => {
+  if (!fecha) return 'No especificada';
+
+  const partes = String(fecha).split('-');
+
+  if (partes.length !== 3) {
+    return fecha;
+  }
+
+  const [anio, mes, dia] = partes;
+  return `${dia}/${mes}/${anio}`;
+};
+
+const formatVentana = (ventana) => {
+  if (!Array.isArray(ventana) || ventana.length < 2) {
+    return 'No especificada';
+  }
+
+  return `${ventana[0]} - ${ventana[1]}`;
+};
+
+const formatPrecioEnergia = (precio) => {
+  if (precio === null || precio === undefined) {
+    return 'No especificado';
+  }
+
+  const numero = Number(precio);
+
+  if (!Number.isFinite(numero)) {
+    return 'No especificado';
+  }
+
+  return `${numero.toLocaleString('es-CL', {
+    maximumFractionDigits: 2,
+  })} CLP/kWh`;
+};
+
+
+
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
@@ -164,12 +265,12 @@ const Ahorro = () => {
               {formatCLP(totalAhorro)}
             </p>
             <p className="text-xs text-gray-500 mt-2">
-              Suma del ahorro de la optimización más reciente.
+              Suma de las recomendaciones de ahorro pendientes.
             </p>
           </div>
           <div className="mt-6 inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-3 py-1 rounded-lg self-start">
             <TrendingUp size={12} />
-            +12.5% vs Mes Anterior
+            Ahorro potencial estimado
           </div>
         </div>
 
@@ -210,19 +311,33 @@ const Ahorro = () => {
         <p className="text-sm text-gray-500">Aún no hay recomendaciones de ahorro disponibles.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {lista.map((r) => {
-            const prioridad = prioridadConfig[r.prioridad] || prioridadConfig.media;
+         {lista.map((r) => {
+            const prioridad =
+              prioridadConfig[r.prioridad] || prioridadConfig.media;
+
             const Icono = iconoConfig[r.icono] || Lightbulb;
 
+            const detalles = parseDescripcionRecomendacion(r.descripcion);
+
+            const equipo = detalles?.equipment;
+            const fechaObjetivo = detalles?.target_date;
+            const ventana = detalles?.window;
+            const horas = detalles?.hours;
+            const precioEnergia = detalles?.price_clp_kwh;
+
             return (
-              <div key={r.id} className="bg-white p-6 rounded-lg shadow-md flex flex-col">
-                {/* Header con ícono + prioridad */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="p-3 rounded-lg bg-green-50 text-green-600">
-                    <Icono size={20} />
+              <div
+                key={r.id}
+                className="bg-white p-6 rounded-xl shadow-md border border-gray-100 flex flex-col hover:shadow-lg transition-shadow"
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between mb-5">
+                  <div className="p-3 rounded-xl bg-green-50 text-green-600">
+                    <Icono size={22} />
                   </div>
+
                   <span
-                    className={`text-xs px-2 py-1 rounded-full ${
+                    className={`text-xs px-3 py-1 rounded-full font-medium ${
                       prioridad.color === 'yellow'
                         ? 'bg-yellow-100 text-yellow-700'
                         : prioridad.color === 'blue'
@@ -234,24 +349,103 @@ const Ahorro = () => {
                   </span>
                 </div>
 
-                {/* Título + descripción */}
-                <h3 className="font-semibold text-gray-800 mb-2">{r.titulo}</h3>
-                <p className="text-sm text-gray-500 mb-4 flex-1">{r.descripcion}</p>
+                {/* Acción */}
+                <h3 className="text-lg font-semibold text-gray-800 mb-1">
+                  {formatAccion(r.titulo)}
+                </h3>
 
-                {/* Footer con ahorro e impacto */}
-                <div className="grid grid-cols-2 gap-3 pt-4 border-t border-gray-100">
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase">Ahorro Est.</p>
-                    <p className="text-lg font-bold text-green-600">{r.porcentaje_ahorro}%</p>
+                <p className="text-xs text-gray-400 mb-5">
+                  Recomendación de optimización energética
+                </p>
+
+                {/* Descripción estructurada */}
+                {detalles ? (
+                  <div className="space-y-3 mb-5 flex-1">
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-sm text-gray-500">
+                        Equipo
+                      </span>
+
+                      <span className="text-sm font-medium text-gray-800 text-right">
+                        {formatEquipo(equipo)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-sm text-gray-500">
+                        Fecha objetivo
+                      </span>
+
+                      <span className="text-sm font-medium text-gray-800 text-right">
+                        {formatFecha(fechaObjetivo)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-sm text-gray-500">
+                        Ventana horaria
+                      </span>
+
+                      <span className="text-sm font-medium text-gray-800 text-right">
+                        {formatVentana(ventana)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-sm text-gray-500">
+                        Duración
+                      </span>
+
+                      <span className="text-sm font-medium text-gray-800 text-right">
+                        {horas !== null && horas !== undefined
+                          ? `${horas} ${Number(horas) === 1 ? 'hora' : 'horas'}`
+                          : 'No especificada'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-sm text-gray-500">
+                        Precio energía
+                      </span>
+
+                      <span className="text-sm font-medium text-gray-800 text-right">
+                        {formatPrecioEnergia(precioEnergia)}
+                      </span>
+                    </div>
                   </div>
+                ) : (
+                  <p className="text-sm text-gray-500 mb-5 flex-1 leading-relaxed">
+                    {r.descripcion || 'Sin descripción disponible.'}
+                  </p>
+                )}
+
+                {/* Ahorro */}
+                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100">
                   <div>
-                    <p className="text-xs text-gray-400 uppercase">Impacto</p>
-                    <p className="text-lg font-bold text-gray-800">{formatCLP(r.monto_clp)}</p>
+                    <p className="text-xs text-gray-400 uppercase tracking-wide">
+                      Ahorro Est.
+                    </p>
+
+                    <p className="text-xl font-bold text-green-600 mt-1">
+                      {r.porcentaje_ahorro ?? 0}%
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-gray-400 uppercase tracking-wide">
+                      Impacto
+                    </p>
+
+                    <p className="text-xl font-bold text-gray-800 mt-1">
+                      {formatCLP(r.monto_clp || 0)}
+                    </p>
                   </div>
                 </div>
               </div>
             );
           })}
+
+
         </div>
       )}
     </div>
