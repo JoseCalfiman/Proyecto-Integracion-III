@@ -2,11 +2,12 @@ import React, { useEffect, useState } from "react";
 import { Camera, AlertTriangle, Zap, TrendingUp, Activity } from "lucide-react";
 import MetricCard from "../../components/ui/MetricCard";
 import ConsumptionChart from "../../components/charts/ConsumptionChart";
+import ManagerAnalytics from "../../components/charts/ManagerAnalytics";
 import { getDashboardLive, getConsumptionSeries } from "../../api/dashboard";
 
 // Resumen de negocio: sin métricas de infraestructura ni datos simulados.
-const RESUMEN_INTERVALO_MS = 15000; // Cada 15 segundos, para que la gerencia vea cambios de estado rápido.
-const CONSUMO_INTERVALO_MS = 60000; // Cada 60 segundos, para no sobrecargar la API con series de consumo que cambian lentamente.
+const RESUMEN_INTERVALO_MS = 15000;
+const CONSUMO_INTERVALO_MS = 60000;
 const numeroValido = (n) => n !== null && n !== undefined && Number.isFinite(Number(n));
 
 const Dashboard = () => {
@@ -121,6 +122,9 @@ const Dashboard = () => {
       <section aria-label="Tendencia de consumo energético">
         <ConsumptionChart data={consumo} loading={cargaConsumo} />
       </section>
+
+      {/* A2: análisis consultado sólo cuando el gerente abre esta sección. */}
+      <ManagerAnalytics consumo={consumo} />
     </div>
   );
 };
