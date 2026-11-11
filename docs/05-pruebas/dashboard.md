@@ -94,15 +94,15 @@ El navegador no debe conectarse a PostgreSQL con credenciales. Se comunica media
 
 La relación es:
 
-\[
+```math
 E\;(\mathrm{kWh}) = P\;(\mathrm{kW}) \times \Delta t\;(\mathrm{horas})
-\]
+```
 
 En `dashboard.py`, FastAPI ordena las mediciones **por cámara**, identifica la siguiente lectura con `LEAD(timestamp)` y estima la energía correspondiente al intervalo entre ambas. Para evitar que los cortes de datos inflen el consumo, acota el intervalo a **300 segundos (5 minutos)**:
 
-\[
+```math
 E_i = P_i \times \frac{\min(t_{i+1}-t_i,\ 300\ \mathrm{s})}{3600}
-\]
+```
 
 Después suma las energías de **todas las cámaras** agrupadas por día en la zona horaria `America/Santiago`. Devuelve **dos decimales** por día y completa con `0` los días sin registros computables.
 
@@ -125,17 +125,17 @@ En `managerStats.js`, la función `resumirConsumoDiario(consumo)` calcula:
 
 **Media diaria** (promedio):
 
-\[
+```math
 \bar{x} = \frac{\sum_{i=1}^{n}x_i}{n}
-\]
+```
 
 **Mediana:** se ordenan los consumos. Si hay siete días, se toma el **cuarto** valor. Para cantidad par, se promedian los dos centrales.
 
 **Desviación estándar poblacional:**
 
-\[
+```math
 \sigma = \sqrt{\frac{\sum_{i=1}^{n}(x_i-\bar{x})^2}{n}}
-\]
+```
 
 Se divide por `n`, **no por `n - 1`**. React redondea visualmente a **un decimal**. PostgreSQL puede reproducir los cálculos con `AVG`, `PERCENTILE_CONT(0.5)` y `STDDEV_POP`.
 
