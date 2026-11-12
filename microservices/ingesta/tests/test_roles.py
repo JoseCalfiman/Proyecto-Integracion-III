@@ -19,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from database import Base, get_db
 from main import app
-from models import Company, GeneratedAlert, Role, User
+from models import AlertAudit, Company, GeneratedAlert, Role, User
 
 
 class RoleMatrix(unittest.TestCase):
@@ -36,6 +36,7 @@ class RoleMatrix(unittest.TestCase):
         tables.tables["sensor_data"].c.id_data.autoincrement = False
         tables.create_all(engine)
         sessions = sessionmaker(engine)
+        self.sessions = sessions
         def db():
             with sessions() as session:
                 yield session
@@ -88,6 +89,27 @@ class RoleMatrix(unittest.TestCase):
                     self.assertEqual(code,expected,body)
                     if path.endswith("/resolve") and code==200:
                         self.assertEqual(body["id_user_resolved"],str(self.users["tecnico"]))
+
+    def test_alert_audit_uses_authenticated_technician(self):
+        token = self.tokens["tecnico"]
+        for action, payload in (("acknowledge", {}), ("resolve", {"note": "Sensor revisado"})):
+            code, body = self.request("PUT", f"/alerts/1/{action}", token, payload)
+            self.assertEqual(code, 200, body)
+
+        with self.sessions() as session:
+            alert = session.get(GeneratedAlert, 1)
+            audits = session.query(AlertAudit).filter_by(id_alert=1).order_by(AlertAudit.id_audit).all()
+            self.assertEqual(alert.status, "resolved")
+            self.assertEqual([row.action for row in audits], ["acknowledged", "resolved"])
+            self.assertEqual(audits[1].detail, "Sensor revisado")
+            for audit, actor, date in (
+                (audits[0], alert.id_user_acknowledged, alert.acknowledgment_date),
+                (audits[1], alert.id_user_resolved, alert.resolution_date),
+            ):
+                self.assertEqual(actor, self.users["tecnico"])
+                self.assertEqual(audit.id_user, actor)
+                self.assertIsNotNone(date)
+                self.assertEqual(audit.action_date, date)
 
     def test_invalid_tokens_and_disabled_account(self):
         claims = {"sub":str(self.users["gerente"]),"role":"gerente","exp":int(time.time())+60}

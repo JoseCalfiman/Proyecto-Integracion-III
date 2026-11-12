@@ -32,11 +32,11 @@ export const getAlertaById = async (id) => {
 };
 
 // reconocer la alerta por el lado del tecnico
-export const reconocerAlerta = async (id) => {
+export const reconocerAlerta = async (id, note) => {
   try {
     const { data } = await apiClient.put(
       `/alerts/${idNumerico(id)}/acknowledge`,
-      {},
+      { note },
     );
     return alertaFromApi(data);
   } catch (error) {
@@ -45,9 +45,9 @@ export const reconocerAlerta = async (id) => {
 };
 
 // resolver alterta (solo tecnico)
-export const resolverAlerta = async (id) => {
+export const resolverAlerta = async (id, note) => {
   try {
-    const { data } = await apiClient.put(`/alerts/${idNumerico(id)}/resolve`, {});
+    const { data } = await apiClient.put(`/alerts/${idNumerico(id)}/resolve`, { note });
     return alertaFromApi(data);
   } catch (error) {
     throw new Error(msg(error, "Error al resolver la alerta"));

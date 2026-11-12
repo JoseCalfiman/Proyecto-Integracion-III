@@ -50,6 +50,7 @@ def _transition(
             id_alert=alert.id_alert,
             id_user=user_id,
             action=new_status,
+            action_date=now,
             detail=data.note or f"Alerta {new_status} por el usuario",
         )
     )
