@@ -9,6 +9,7 @@ import scheduler as sched
 from health import health
 from kafka_producer import build_recommendation, publish_report
 from optimizer import forecast_daily_consumption
+from outliers import mark_consumption_outliers
 
 
 @pytest.mark.parametrize(
@@ -16,7 +17,7 @@ from optimizer import forecast_daily_consumption
     [
         pytest.param([80.0] * 14, 80.0, id="consumo-estable"),
         pytest.param([10_000.0] * 14, 10_000.0, id="consumo-alto"),
-        pytest.param([80.0] * 13 + [100_000.0], None, id="consumo-con-outlier"),
+        pytest.param([80.0] * 13 + [100_000.0], 80.0, id="consumo-con-outlier"),
     ],
 )
 def test_forecast_scenarios_produce_finite_predictions(consumption, expected_level):
@@ -35,6 +36,50 @@ def test_forecast_scenarios_produce_finite_predictions(consumption, expected_lev
     assert pd.Timestamp(forecast["ds"].iloc[-1]) == pd.Timestamp("2026-01-15")
     if expected_level is not None:
         assert forecast["yhat"].iloc[-1] == pytest.approx(expected_level, rel=0.01)
+
+
+def test_isolated_spike_does_not_distort_forecast_or_savings():
+    dates = pd.date_range("2026-01-01", periods=14, freq="D")
+    normal = pd.DataFrame({"ds": dates, "y": [80.0] * 14})
+    spiked = normal.copy()
+    spiked.loc[spiked.index[-1], "y"] = 100_000.0
+
+    mark = mark_consumption_outliers(spiked)
+    assert bool(mark.frame["is_outlier"].iloc[-1])
+    assert mark.frame["y_original"].iloc[-1] == 100_000.0
+    assert spiked["y"].iloc[-1] == 100_000.0
+
+    forecast_normal = forecast_daily_consumption(normal, horizon=1)
+    forecast_spiked = forecast_daily_consumption(spiked, horizon=1)
+
+    assert forecast_normal is not None
+    assert forecast_spiked is not None
+    assert forecast_spiked.attrs["consumption_outliers"] == [
+        {"ds": "2026-01-14T00:00:00", "y_original": 100_000.0}
+    ]
+    assert forecast_spiked["yhat"].iloc[-1] == pytest.approx(
+        forecast_normal["yhat"].iloc[-1], rel=0.05
+    )
+
+    report = build_recommendation(
+        id_chamber="44444444-4444-4444-4444-444444444444",
+        prediction_date="2026-01-15",
+        predicted_kwh=float(forecast_spiked["yhat"].iloc[-1]),
+        price_kwh=145.0,
+    )
+    normal_report = build_recommendation(
+        id_chamber="44444444-4444-4444-4444-444444444444",
+        prediction_date="2026-01-15",
+        predicted_kwh=float(forecast_normal["yhat"].iloc[-1]),
+        price_kwh=145.0,
+    )
+    assert report["projected_daily_cost"] == pytest.approx(
+        normal_report["projected_daily_cost"], rel=0.05
+    )
+    assert report["estimated_savings"] == pytest.approx(
+        normal_report["estimated_savings"], rel=0.05
+    )
+    assert report["projected_daily_cost"] < 100_000.0
 
 
 def test_insufficient_daily_consumption_does_not_create_forecast():
