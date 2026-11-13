@@ -65,6 +65,16 @@ def test_lectura_valida_se_procesa(worker):
     assert worker.guardadas[0]["chamber_id"] == CHAMBER
 
 
+def test_consumer_registra_diagnostico_y_evitar_alerta_por_spike(worker, caplog):
+    with caplog.at_level("INFO"):
+        for i, temperatura in enumerate([-18, -18, -18, -18, 20]):
+            worker._procesar_mensaje(FakeMsg(_lectura(i, temperatura)))
+    assert worker.guardadas[-1]["calculated_slope"] == 0
+    assert worker.alertas == []
+    assert "diagnostico=" in caplog.text
+    assert "'outlier_count': 1" in caplog.text
+
+
 @pytest.mark.parametrize(
     "raw",
     [b"esto no es json", b"[1,2]", b'{"fridge_id": "FRIDGE_001", "temperature": 5}', b"\xff\xfe"],
@@ -77,7 +87,7 @@ def test_mensajes_invalidos_se_descartan_sin_excepcion(worker, raw):
 def test_timestamp_epoch_y_iso_en_la_misma_camara(worker):
     worker._procesar_mensaje(FakeMsg(_lectura(0, -18.0)))
     epoch = {**_lectura(1, -17.5), "timestamp": (T0 + timedelta(minutes=1)).timestamp()}
-    worker._procesar_mensaje(FakeMsg(epoch))  # antes lanzaba TypeError
+    worker._procesar_mensaje(FakeMsg(epoch))
     assert len(worker.guardadas) == 2
 
 

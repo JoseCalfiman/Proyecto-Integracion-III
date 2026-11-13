@@ -4,7 +4,7 @@ from typing import List, Optional, Union
 
 import numpy as np
 
-from descriptive_stats import detectar_atipicos
+from descriptive_stats import calcular_estadisticas, detectar_atipicos
 
 logger = logging.getLogger(__name__)
 
@@ -78,42 +78,63 @@ def evaluar_riesgo(
     buffer: List[dict],
     absolute_max_temp: float,
     umbral_alerta_minutos: float = 40.0,
+    umbral_std_temp: float = 0.5,
 ) -> dict:
-
-    if len(buffer) < 2:
-        return {
-            "pendiente_por_minuto": None,
-            "tiempo_restante_min": None,
-            "hay_riesgo": False,
-            "nivel_riesgo": "SIN_RIESGO",
-        }
+    if not np.isfinite(umbral_std_temp) or umbral_std_temp <= 0:
+        raise ValueError("umbral_std_temp debe ser finito y positivo")
 
     timestamps = [d["timestamp"] for d in buffer]
     temperaturas = [d["temperature"] for d in buffer]
-
+    datos_finitos = bool(np.isfinite(temperaturas).all())
+    estadisticas = calcular_estadisticas(temperaturas) if datos_finitos else {}
     indices_atipicos = detectar_atipicos(temperaturas)
+    lecturas_atipicas = [buffer[indice] for indice in indices_atipicos]
     if indices_atipicos:
-        lecturas_atipicas = [buffer[indice] for indice in indices_atipicos]
         logger.warning(
             "Lecturas atípicas en ventana predictiva: outlier_count=%d, lecturas=%s",
             len(lecturas_atipicas),
             lecturas_atipicas,
         )
 
-    pendiente = calcular_pendiente(timestamps, temperaturas)
-    if pendiente is None:
-        return {
-            "pendiente_por_minuto": None,
-            "tiempo_restante_min": None,
-            "hay_riesgo": False,
-            "nivel_riesgo": "SIN_RIESGO",
-        }
+    indices_excluidos = set(indices_atipicos)
+    utilizables = [lectura for i, lectura in enumerate(buffer) if i not in indices_excluidos]
+    segundos = _timestamps_a_segundos(timestamps) if timestamps else np.array([])
+    tiempos_finitos = bool(np.isfinite(segundos).all())
+    span_minutes = float(np.ptp(segundos) / 60) if len(segundos) and tiempos_finitos else None
+    tiempos_utilizables = [lectura["timestamp"] for lectura in utilizables]
+    temperaturas_utilizables = [lectura["temperature"] for lectura in utilizables]
+    pendiente = calcular_pendiente(tiempos_utilizables, temperaturas_utilizables)
+    insuficiente = (
+        len(utilizables) < 2 or not datos_finitos or not tiempos_finitos
+        or np.ptp(_timestamps_a_segundos(tiempos_utilizables)) == 0
+    )
+    condiciones = []
+    if insuficiente:
+        pendiente = None
+        condiciones.append("VENTANA_INSUFICIENTE")
+    if estadisticas.get("std") is not None and estadisticas["std"] >= umbral_std_temp:
+        condiciones.append("DATOS_VARIABLES")
+    if indices_atipicos:
+        condiciones.append("CON_ATIPICOS")
+    diagnostico = {
+        "sample_count": len(buffer),
+        "span_minutes": span_minutes,
+        "std_temp": estadisticas.get("std"),
+        "iqr_temp": estadisticas.get("iqr"),
+        "outlier_count": len(indices_atipicos),
+        "outliers": [
+            {"index": indice, **buffer[indice]} for indice in indices_atipicos
+        ],
+        "usable_sample_count": len(utilizables) if datos_finitos and tiempos_finitos else 0,
+        "umbral_std_temp": umbral_std_temp,
+        "condiciones": condiciones,
+    }
 
     tiempo_restante = estimar_tiempo_restante(
-        temperatura_actual=temperaturas[-1],
+        temperatura_actual=temperaturas_utilizables[-1],
         absolute_max_temp=absolute_max_temp,
         pendiente_por_minuto=pendiente,
-    )
+    ) if pendiente is not None else None
 
     hay_riesgo = tiempo_restante is not None and tiempo_restante <= umbral_alerta_minutos
     nivel_riesgo = determinar_nivel_riesgo(tiempo_restante, umbral_alerta_minutos)
@@ -123,11 +144,12 @@ def evaluar_riesgo(
         "tiempo_restante_min": tiempo_restante,
         "hay_riesgo": hay_riesgo,
         "nivel_riesgo": nivel_riesgo,
+        "diagnostico": diagnostico,
     }
 
 
 if __name__ == "__main__":
-    timestamps_test = [0, 60, 120, 180] # segundos
+    timestamps_test = [0, 60, 120, 180]
     temps_test = [20.0, 21.0, 22.0, 23.0]
 
     pendiente_val = calcular_pendiente(timestamps_test, temps_test)

@@ -144,7 +144,8 @@ class PredictiveKafkaWorker:
                 f"[{id_chamber}] "
                 f"pendiente={resultado['pendiente_por_minuto']} "
                 f"tiempo_restante_min={resultado['tiempo_restante_min']} "
-                f"nivel_riesgo={resultado['nivel_riesgo']}"
+                f"nivel_riesgo={resultado['nivel_riesgo']} "
+                f"diagnostico={resultado['diagnostico']}"
             )
 
             projected_temperature = (
