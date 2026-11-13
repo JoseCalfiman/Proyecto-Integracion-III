@@ -4,6 +4,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+FACTOR_IQR = 1.5  # Multiplicador convencional de la regla de Tukey.
+
 
 def _cuartiles(valores: np.ndarray) -> tuple[float, float]:
     # Interpolación lineal sobre las posiciones (n - 1) * q
@@ -14,7 +16,6 @@ def _cuartiles(valores: np.ndarray) -> tuple[float, float]:
 def calcular_estadisticas(
     muestras: Sequence[float],
 ) -> dict[str, Optional[float]]:
-    """Resume una serie finita. La desviación muestral requiere dos muestras."""
     valores = np.asarray(muestras, dtype=float)
     conteo = len(valores)
     if not np.isfinite(valores).all():
@@ -38,14 +39,13 @@ def calcular_estadisticas(
         "iqr": q3 - q1,
     }
 
-
+#Devuelve índices fuera de Q1/Q3 ampliados por FACTOR_IQR veces el IQR
 def detectar_atipicos(muestras: Sequence[float]) -> list[int]:
-    """Devuelve los índices originales fuera de los límites de 1,5 IQR."""
     valores = np.asarray(muestras, dtype=float)
     if len(valores) == 0 or not np.isfinite(valores).all():
         return []
 
     q1, q3 = _cuartiles(valores)
-    margen = 1.5 * (q3 - q1)
+    margen = FACTOR_IQR * (q3 - q1)
     fuera_de_limites = (valores < q1 - margen) | (valores > q3 + margen)
     return np.flatnonzero(fuera_de_limites).tolist()
