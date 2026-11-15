@@ -3,7 +3,7 @@
 import apiClient from "./client";
 
 const MAX_ALERTAS = 200; // Límite permitido por GET /alerts. No descarga el historial completo.
-
+// ofset lo que hace es permitir paginar, pero no lo usamos porque no necesitamos todo el historial, solo un resumen estadístico.
 export const getAlertasParaEstadisticas = async ({ signal } = {}) => {
   const { data } = await apiClient.get("/alerts", {
     params: { limit: MAX_ALERTAS, offset: 0 },

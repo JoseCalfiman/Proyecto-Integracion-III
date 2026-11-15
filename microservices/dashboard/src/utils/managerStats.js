@@ -29,14 +29,15 @@ export const resumirConsumoDiario = (registros = []) => {
   const desviacion = Math.sqrt(valores.reduce((s, x) => s + (x - media) ** 2, 0) / n);
   return { n, total, media, mediana: mediana(ordenados), desviacion };
 };
-
+// Prepara un resumen estadístico de alertas por día y ranking de cámaras.
 export const prepararEstadisticasAlertas = (registros = [], dias = 7, hoy = new Date()) => {
   const rango = [7, 14, 30].includes(Number(dias)) ? Number(dias) : 7;
   const fin = new Date(hoy);
   const inicio = new Date(fin);
   inicio.setHours(0, 0, 0, 0);
   inicio.setDate(inicio.getDate() - rango + 1);
-
+ 
+  // Inicializar el mapa de días con cantidad 0 para cada día del rango.
   const porDia = new Map();
   for (let i = 0; i < rango; i++) {
     const fecha = new Date(inicio);
@@ -48,7 +49,7 @@ export const prepararEstadisticasAlertas = (registros = [], dias = 7, hoy = new 
       cantidad: 0,
     });
   }
-
+  // Contar alertas por día y por cámara, filtrando por rango de fechas.
   const camaras = new Map();
   let total = 0;
   for (const alerta of (Array.isArray(registros) ? registros : [])) {
