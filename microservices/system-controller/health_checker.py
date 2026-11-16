@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import socket
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -29,7 +31,7 @@ class Component:
     restartable: bool = False
     kind: str = "Deployment"
     check: Optional[Callable[[], Awaitable[CheckResult]]] = None
-    timeout: float = 3.0  
+    timeout: float = 3.0
     # Si no hay URL de salud, se mide cada pod por su IP (puerto y ruta) usando la API de Kubernetes.
     pod_health_port: Optional[int] = None
     pod_health_path: str = "/health"
@@ -43,6 +45,35 @@ def _elapsed_ms(start: float) -> int:
     return max(1, round((time.perf_counter() - start) * 1000))
 
 
+# A partir de cuántos reinicios acumulados se avisa en el detalle (J6).
+RESTART_WARN_THRESHOLD = int(os.getenv("RESTART_WARN_THRESHOLD", "3"))
+
+
+def classify_network_error(exc: BaseException) -> str:
+    """Recorre la cadena de causas y devuelve: 'dns', 'refused', 'timeout' u 'other'."""
+    seen = 0
+    while exc is not None and seen < 8:
+        if isinstance(exc, socket.gaierror):
+            return "dns"
+        if isinstance(exc, ConnectionRefusedError):
+            return "refused"
+        if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+            return "timeout"
+        exc = exc.__cause__ or exc.__context__
+        seen += 1
+    return "other"
+
+
+def http_unhealthy_hint(code: int) -> str:
+    if code in (401, 403):
+        return "exige autenticación (la ruta de salud no debería pedirla)"
+    if code == 404:
+        return "la ruta de salud no existe en el servicio"
+    if code >= 500:
+        return "el servicio responde pero se declara no saludable"
+    return "respuesta inesperada del servicio"
+
+
 # ----------------------------------------------------------------- checks
 # Los detalles NO incluyen nombres de host internos a propósito
 
@@ -53,11 +84,20 @@ async def check_http(url: str, timeout: float) -> CheckResult:
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(url)
     except httpx.TimeoutException:
-        return CheckResult(False, False, None, f"Timeout (> {timeout:g} s) en {path}")
+        return CheckResult(False, False, None, f"Timeout (> {timeout:g} s) en {path}: el servicio no contestó a tiempo (lento o bloqueado)")
     except httpx.HTTPError as exc:
-        return CheckResult(False, False, None, f"No responde en {path} ({type(exc).__name__})")
+        kind = classify_network_error(exc)
+        if kind == "dns":
+            msg = f"No se resuelve el nombre del servicio (DNS) al consultar {path}: revisa que su Service exista"
+        elif kind == "refused":
+            msg = f"Conexión rechazada en {path}: el proceso no está escuchando (¿se cayó o está iniciando?)"
+        else:
+            msg = f"No responde en {path} ({type(exc).__name__})"
+        return CheckResult(False, False, None, msg)
     latency = _elapsed_ms(start)
     detail = f"HTTP {response.status_code} en {path}"
+    if not response.is_success:
+        detail += f": {http_unhealthy_hint(response.status_code)}"
     return CheckResult(True, response.is_success, latency, detail)
 
 
@@ -84,9 +124,16 @@ async def check_tcp(host: str, port: int, timeout: float) -> CheckResult:
     try:
         _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
     except asyncio.TimeoutError:
-        return CheckResult(False, False, None, f"Timeout (> {timeout:g} s) en el puerto {port}")
-    except OSError:
-        return CheckResult(False, False, None, f"No responde en el puerto {port}")
+        return CheckResult(False, False, None, f"Timeout (> {timeout:g} s) en el puerto {port}: el servicio no contestó a tiempo (lento o bloqueado)")
+    except OSError as exc:
+        kind = classify_network_error(exc)
+        if kind == "dns":
+            msg = f"No se resuelve el nombre del servicio (DNS) en el puerto {port}: revisa que su Service exista"
+        elif kind == "refused":
+            msg = f"Conexión rechazada en el puerto {port}: nada escucha ahí (¿se cayó o está iniciando?)"
+        else:
+            msg = f"No responde en el puerto {port}"
+        return CheckResult(False, False, None, msg)
     latency = _elapsed_ms(start)
     writer.close()
     try:
@@ -119,7 +166,7 @@ async def layered_check(
 
 
 # ----------------------------------------------------------------- reglas
-def derive_status(
+def _derive_base(
     replicas: Optional[Replicas],
     check: Optional[CheckResult],
     latency_threshold_ms: int,
@@ -147,6 +194,31 @@ def derive_status(
             f"{check.detail}; latencia sobre el umbral ({check.latency_ms} ms > {latency_threshold_ms} ms)",
         )
     return Status.ONLINE, check.detail
+
+
+def derive_status(
+    replicas: Optional[Replicas],
+    check: Optional[CheckResult],
+    latency_threshold_ms: int,
+    *,
+    issue: Optional[str] = None,
+    restarts: Optional[int] = None,
+    last_restart_reason: Optional[str] = None,
+    scale_hint: Optional[str] = None,
+) -> Tuple[Status, str]:
+    """Estado + detalle con una pista accionable (J6). Sin datos extra, el texto no cambia."""
+    status, detail = _derive_base(replicas, check, latency_threshold_ms)
+    parts = [detail]
+    if replicas is not None and replicas.desired == 0 and scale_hint:
+        parts.append(f"alguien lo escaló a 0; para encenderlo: {scale_hint}")
+    elif replicas is not None and replicas.ready < replicas.desired and issue:
+        parts.append(issue)
+    if restarts is not None and restarts >= RESTART_WARN_THRESHOLD:
+        extra = f"{restarts} reinicios acumulados"
+        if last_restart_reason:
+            extra += f" (último motivo: {last_restart_reason})"
+        parts.append(extra)
+    return status, " — ".join(parts)
 
 
 def derive_global(statuses: Dict[str, Status], critical: Sequence[str]) -> Status:
@@ -216,7 +288,15 @@ async def evaluate_component(component: Component, k8s, latency_threshold_ms: in
     replicas = (
         Replicas(desired=workload.desired, ready=workload.ready) if workload is not None else None
     )
-    status, detail = derive_status(replicas, check_res, latency_threshold_ms)
+    kind = getattr(component, "kind", "Deployment")
+    scale_hint = f"kubectl scale {'sts' if kind == 'StatefulSet' else 'deploy'}/{component.name} --replicas=1"
+    status, detail = derive_status(
+        replicas, check_res, latency_threshold_ms,
+        issue=getattr(workload, "issue", None),
+        restarts=workload.restarts if workload is not None else None,
+        last_restart_reason=getattr(workload, "last_restart_reason", None),
+        scale_hint=scale_hint,
+    )
     return ComponentStatus(
         name=component.name,
         type=component.type,
