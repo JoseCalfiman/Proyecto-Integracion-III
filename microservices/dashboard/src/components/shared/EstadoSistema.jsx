@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Activity, RefreshCw, RotateCcw, AlertTriangle } from "lucide-react";
 import Badge from "../ui/Badge";
 import Modal from "../ui/Modal";
 import { usePolling } from "../../hooks/usePolling";
-import { getSystemStatus, restartComponent } from "../../api/systemStatus";
+import {getSystemStatus, restartComponent, getRollout} from "../../api/systemStatus";
 
 const POLL_NORMAL_MS = 5000;
 const POLL_FAST_MS = 2000;
 const FAST_WINDOW_MS = 60000;
+const ROLLOUT_POLL_MS = 2000;
+const ROLLOUT_MAX_MS = 120000;
 
 const STATUS = {
   ONLINE: { color: "green", label: "Online", dot: "bg-green-500" },
@@ -53,6 +55,42 @@ const EstadoSistema = () => {
     return () => clearTimeout(t);
   }, [fastUntil]);
 
+  // Evita actualizar el estado si el panel se cierra mientras se espera un reinicio.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Consulta el avance real del reinicio hasta que Kubernetes lo da por completo.
+  const waitForRollout = async (name) => {
+    const limit = Date.now() + ROLLOUT_MAX_MS;
+    while (mounted.current && Date.now() < limit) {
+      await sleep(ROLLOUT_POLL_MS);
+      if (!mounted.current) return;
+      try {
+        const r = await getRollout(name);
+        if (r.phase === "COMPLETE") {
+          setFeedback({ type: "ok", text: `"${name}": ${r.message}.` });
+          return;
+        }
+        setFeedback({ type: "ok", text: `"${name}": ${r.message}` });
+      } catch {
+        // Si falla una consulta puntual se sigue intentando hasta el límite.
+      }
+    }
+    if (mounted.current) {
+      setFeedback({
+        type: "error",
+        text: `"${name}" sigue reiniciándose pasados ${ROLLOUT_MAX_MS / 1000} s. Revisa su detalle.`,
+      });
+    }
+  };
+
   const confirmRestart = async () => {
     const name = target.name;
     setTarget(null);
@@ -61,19 +99,20 @@ const EstadoSistema = () => {
       await restartComponent(name);
       setFeedback({
         type: "ok",
-        text: `Reinicio de "${name}" solicitado. Observa cómo vuelve a ONLINE.`,
+        text: `Reinicio de "${name}" solicitado. Esperando a Kubernetes…`,
       });
       setFast(true);
       setFastUntil(Date.now() + FAST_WINDOW_MS);
       refresh();
-      // El marcador "Reiniciando…"(15 s).
-      setTimeout(() => setRestarting((r) => ({ ...r, [name]: false })), 15000);
+      await waitForRollout(name);
     } catch (e) {
       setFeedback({
         type: "error",
         text: `No se pudo reiniciar "${name}": ${e.message}`,
       });
-      setRestarting((r) => ({ ...r, [name]: false }));
+    } finally {
+      if (mounted.current) setRestarting((r) => ({ ...r, [name]: false }));
+      refresh();
     }
   };
 

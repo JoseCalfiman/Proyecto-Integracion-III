@@ -47,6 +47,18 @@ const MOCK_SENSORES = [
   { id: 'SN-103', ubicacion: 'Pre-Cámara Sur', tipo: 'Apertura Puerta', bateria: 32, ultima_lectura: 'Hace 14d', estado: 'ok' },
 ];
 
+// Aviso visible cuando una sección muestra datos de ejemplo (el endpoint /panel/* no respondió).
+const AvisoEjemplo = ({ why }) => (
+  <span
+    className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full"
+    title={why}
+    data-testid="datos-ejemplo"
+  >
+    <AlertTriangle size={12} />
+    DATOS DE EJEMPLO
+  </span>
+);
+
 // ============================================================
 // CONFIGURACIÓN DE COLORES
 // ============================================================
@@ -76,15 +88,16 @@ const PanelTecnico = () => {
   // ==========================================================
   // CARGAR DATOS DESDE LA API
   // ==========================================================
-  const { data: gateways } = useFetch(getGateways, [], MOCK_GATEWAYS);
-  const { data: alertas } = useFetch(getAlertasSistema, [], MOCK_ALERTAS);
-  const { data: trafico } = useFetch(getTraficoRed, [], MOCK_TRAFICO);
-  const { data: sensores, reload: reloadSensores } = useFetch(getSensores, [], MOCK_SENSORES);
+  const { data: gateways, isFallback: gatewaysEjemplo } = useFetch(getGateways, [], MOCK_GATEWAYS);
+  const { data: alertas, isFallback: alertasEjemplo } = useFetch(getAlertasSistema, [], MOCK_ALERTAS);
+  const { data: trafico, isFallback: traficoEjemplo } = useFetch(getTraficoRed, [], MOCK_TRAFICO);
+  const { data: sensores, reload: reloadSensores, isFallback: sensoresEjemplo } = useFetch(getSensores, [], MOCK_SENSORES);
 
   const listaGateways = Array.isArray(gateways) ? gateways : [];
   const listaAlertas = Array.isArray(alertas) ? alertas : [];
   const listaSensores = Array.isArray(sensores) ? sensores : [];
-  const datosTrafico = Array.isArray(trafico) && trafico.length > 0 ? trafico : MOCK_TRAFICO;
+  const datosTrafico = Array.isArray(trafico) ? trafico : [];
+  const gatewaysOnline = listaGateways.filter((g) => g.estado === 'online').length;
 
   // ==========================================================
   // VERIFICAR SALUD
@@ -146,10 +159,14 @@ const PanelTecnico = () => {
               <h2 className="font-semibold text-gray-800">Estado de Gateways</h2>
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-3 py-1 rounded-full">
-                <CheckCircle2 size={12} />
-                98.9% UPTIME
-              </span>
+              {gatewaysEjemplo ? (
+                <AvisoEjemplo why="No se pudo consultar /panel/gateways: se muestran datos de ejemplo" />
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-3 py-1 rounded-full">
+                  <CheckCircle2 size={12} />
+                  {gatewaysOnline}/{listaGateways.length} ONLINE
+                </span>
+              )}
               <button
                 onClick={verificarSaludSistema}
                 disabled={verificando}
@@ -199,9 +216,13 @@ const PanelTecnico = () => {
               <Bell size={18} className="text-yellow-600" />
               <h2 className="font-semibold text-gray-800">Alertas del Sistema</h2>
             </div>
-            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-              {listaAlertas.length} Nuevas
-            </span>
+            {alertasEjemplo ? (
+              <AvisoEjemplo why="No se pudo consultar /panel/alertas: se muestran datos de ejemplo" />
+            ) : (
+              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                {listaAlertas.length} Nuevas
+              </span>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -243,6 +264,9 @@ const PanelTecnico = () => {
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-gray-800">Tráfico de Red (Últimas 6H)</h2>
             <div className="flex items-center gap-3 text-xs">
+              {traficoEjemplo && (
+                <AvisoEjemplo why="No se pudo consultar /panel/trafico: se muestran datos de ejemplo" />
+              )}
               <div className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-green-500"></span>
                 <span className="text-gray-600">RX</span>
@@ -342,6 +366,9 @@ const PanelTecnico = () => {
           <div className="flex items-center gap-2">
             <Thermometer size={18} className="text-green-600" />
             <h2 className="font-semibold text-gray-800">Inventario de Sensores</h2>
+            {sensoresEjemplo && (
+              <AvisoEjemplo why="No se pudo consultar /panel/sensores: se muestran datos de ejemplo" />
+            )}
           </div>
           <button className="text-xs text-green-600 hover:text-green-700 font-medium">
             Ver Todos

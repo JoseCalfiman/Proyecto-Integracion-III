@@ -48,6 +48,11 @@ def _optional_http_check(env_name: str, timeout: float = 2.0) -> Optional[Callab
     return _http_check(url, timeout) if url else None
 
 
+async def _self_check() -> CheckResult:
+    """El Controller se evalúa a sí mismo"""
+    return CheckResult(True, True, 0, "Respondiendo")
+
+
 COMPONENTS = [
     Component("ingesta", "microservice", critical=True, restartable="ingesta" in RESTART_ALLOWLIST,
               check=_http_check(INGESTA_URL, 2.0), timeout=2.0),
@@ -62,6 +67,8 @@ COMPONENTS = [
               pod_health_port=_health_port("WORKER_OPTIMIZACION_HEALTH_PORT", 8080)),
     Component("dashboard", "frontend", restartable="dashboard" in RESTART_ALLOWLIST,
               check=_http_check(DASHBOARD_URL, 2.0), timeout=2.0),
+    Component("system-controller", "microservice", restartable=False,
+              check=_self_check, timeout=1.0),
     Component("kafka", "infra", critical=True, restartable="kafka" in RESTART_ALLOWLIST,
               check=kafka_checker.check, timeout=3.0),
     Component("timescaledb", "infra", critical=True, restartable="timescaledb" in RESTART_ALLOWLIST,

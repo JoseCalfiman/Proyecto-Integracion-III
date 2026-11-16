@@ -177,6 +177,12 @@ async def _run_probes(component: Component, k8s) -> Tuple[Optional[CheckResult],
     if isinstance(workload, BaseException):
         logger.warning("Lectura de Kubernetes falló para '%s': %s", component.name, workload)
         workload = None
+
+    # Un check mal escrito no debe tumbar todo.
+    if check_res is not None and not isinstance(check_res, CheckResult):
+        logger.error("El check de '%s' devolvió %s en vez de CheckResult", component.name, type(check_res).__name__)
+        check_res = CheckResult(True, False, None, "Error interno: el check devolvió un resultado inválido")
+
     # Sin URL de salud: medir cada pod por su IP (Kubernetes ya nos dijo cuáles son).
     if (
         check_res is None
