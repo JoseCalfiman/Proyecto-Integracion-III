@@ -19,6 +19,7 @@ DEFAULT_HACCP_RULE = {
     "critical_temp_c": 6.0,
     "sample_interval_seconds": 10,
 }
+ALLOWED_HACCP_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 
 
 class HaccpRuleConfigurationError(ValueError):
@@ -136,16 +137,35 @@ def evaluate_predictive_event(
             )
         return number
 
+    def rule_value(field: str) -> Any:
+        if isinstance(rule, Mapping):
+            return rule.get(field)
+        return getattr(rule, field, None)
+
+    if rule_value("active") is not True:
+        raise HaccpRuleConfigurationError(
+            "La regla HACCP debe estar activa para ser aplicada."
+        )
+
+    severity = rule_value("severity")
+    if not isinstance(severity, str) or severity not in ALLOWED_HACCP_SEVERITIES:
+        raise HaccpRuleConfigurationError(
+            "Severidad inválida en la regla HACCP; debe ser una de: "
+            + ", ".join(sorted(ALLOWED_HACCP_SEVERITIES))
+            + "."
+        )
+
     min_temp = rule_number("min_absolute_temp")
     max_temp = rule_number("max_absolute_temp")
     tolerance = rule_number("tolerance_time_min")
-    if min_temp > max_temp:
+    if min_temp >= max_temp:
         raise HaccpRuleConfigurationError(
-            "La regla HACCP tiene min_absolute_temp mayor que max_absolute_temp."
+            "La regla HACCP requiere min_absolute_temp menor que "
+            "max_absolute_temp."
         )
-    if tolerance < 0:
+    if tolerance <= 0:
         raise HaccpRuleConfigurationError(
-            "La regla HACCP tiene tolerance_time_min negativa."
+            "La regla HACCP requiere tolerance_time_min mayor que cero."
         )
 
     temperature = event_values["temperature"]
@@ -339,6 +359,7 @@ def validar_haccp(payload: Mapping[str, Any], rule: Any) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_HACCP_RULE",
+    "ALLOWED_HACCP_SEVERITIES",
     "HaccpRuleConfigurationError",
     "evaluate_temperature_rule",
     "evaluate_temperature_series",

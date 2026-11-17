@@ -17,6 +17,8 @@ ACTIVE_RULE = {
     "min_absolute_temp": -20.0,
     "max_absolute_temp": 5.0,
     "tolerance_time_min": 15,
+    "severity": "medium",
+    "active": True,
 }
 
 
@@ -124,9 +126,14 @@ def test_predictive_event_message_omits_unavailable_optional_context():
         {"max_absolute_temp": float("inf")},
         {"tolerance_time_min": float("nan")},
         {"tolerance_time_min": -1},
+        {"tolerance_time_min": 0},
         {"min_absolute_temp": 6, "max_absolute_temp": 5},
+        {"min_absolute_temp": 5, "max_absolute_temp": 5},
         {"max_absolute_temp": "5"},
         {"tolerance_time_min": True},
+        {"severity": "urgent"},
+        {"active": False},
+        {"active": None},
     ],
 )
 def test_predictive_event_rejects_invalid_active_rule(rule_overrides):

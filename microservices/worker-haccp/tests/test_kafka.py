@@ -830,8 +830,12 @@ def test_predictive_event_without_infringement_is_not_persisted_and_commits(
         {"max_absolute_temp": float("inf")},
         {"tolerance_time_min": float("nan")},
         {"tolerance_time_min": -1},
+        {"tolerance_time_min": 0},
         {"min_absolute_temp": 6, "max_absolute_temp": 5},
+        {"min_absolute_temp": 5, "max_absolute_temp": 5},
         {"max_absolute_temp": "5"},
+        {"severity": "urgent"},
+        {"active": False},
     ],
 )
 def test_invalid_active_rule_leaves_offset_uncommitted_and_stops_processing(
@@ -848,6 +852,7 @@ def test_invalid_active_rule_leaves_offset_uncommitted_and_stops_processing(
         "min_absolute_temp": -20,
         "max_absolute_temp": 5,
         "tolerance_time_min": 15,
+        "active": True,
     }
     rule_values.update(rule_overrides)
     rule = SimpleNamespace(**rule_values)
@@ -868,7 +873,7 @@ def test_invalid_active_rule_leaves_offset_uncommitted_and_stops_processing(
     assert "offset queda sin confirmar" in caplog.text
 
 
-def test_missing_active_rule_uses_defaults_without_alert_and_commits(
+def test_missing_active_rule_skips_alert_and_commits(
     monkeypatch, caplog
 ):
     caplog.set_level("INFO")
@@ -878,44 +883,11 @@ def test_missing_active_rule_uses_defaults_without_alert_and_commits(
     monkeypatch.setattr(
         kafka_consumer, "get_active_rule", lambda session, chamber_id: None
     )
-    consumer = FakeKafkaConsumer()
-
-    _handle_kafka_message(
-        consumer,
-        FakeKafkaMessage(
-            json.dumps(
-                valid_anomaly_payload(temperature=4, remaining_time_min=16)
-            ).encode("utf-8"),
-            32,
-        ),
-    )
-
-    assert consumer.committed_offsets == [32]
-    assert "No existe regla HACCP activa" in caplog.text
-    assert "regla predeterminada" in caplog.text
-    assert CHAMBER_ID in caplog.text
-    assert "sin infracciones HACCP" in caplog.text
-    assert any(
-        record.levelname == "WARNING"
-        and CHAMBER_ID in record.message
-        and "regla predeterminada" in record.message
-        for record in caplog.records
-    )
-    with Session(engine) as session:
-        assert session.scalar(select(GeneratedAlert)) is None
-
-
-def test_missing_active_rule_uses_defaults_and_continues_processing(
-    monkeypatch, caplog
-):
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(bind=engine)
-    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
     monkeypatch.setattr(
-        kafka_consumer, "get_active_rule", lambda session, chamber_id: None
+        kafka_consumer,
+        "publish_haccp_alert",
+        lambda payload: pytest.fail("No debe publicarse una alerta sin regla activa"),
     )
-    published = []
-    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", published.append)
     consumer = FakeKafkaConsumer()
 
     _handle_kafka_message(
@@ -924,37 +896,22 @@ def test_missing_active_rule_uses_defaults_and_continues_processing(
             json.dumps(
                 valid_anomaly_payload(temperature=5, remaining_time_min=20)
             ).encode("utf-8"),
-            320,
-        ),
-    )
-    _handle_kafka_message(
-        consumer,
-        FakeKafkaMessage(
-            json.dumps(
-                valid_anomaly_payload(
-                    id_prediction=18,
-                    temperature=4,
-                    remaining_time_min=16,
-                )
-            ).encode("utf-8"),
-            321,
+            32,
         ),
     )
 
-    assert consumer.committed_offsets == [320, 321]
-    assert caplog.text.count("se utiliza la regla predeterminada") == 2
+    assert consumer.committed_offsets == [32]
+    assert "No existe regla HACCP activa" in caplog.text
+    assert "se omite el evento sin generar alerta" in caplog.text
     assert CHAMBER_ID in caplog.text
-    assert len(published) == 1
-    assert published[0]["severity"] == "medium"
-    assert published[0]["id_prediction"] == 17
+    assert any(
+        record.levelname == "WARNING"
+        and CHAMBER_ID in record.message
+        and "sin generar alerta" in record.message
+        for record in caplog.records
+    )
     with Session(engine) as session:
-        alert = session.scalar(select(GeneratedAlert))
-        audit = session.scalar(select(AlertAudit))
-    assert alert is not None
-    assert alert.severity == "medium"
-    assert alert.id_haccp_rule is None
-    assert audit is not None
-    assert audit.id_alert == alert.id_alert
+        assert session.scalar(select(GeneratedAlert)) is None
 
 
 @pytest.mark.parametrize("delivery_failure", [False, True])

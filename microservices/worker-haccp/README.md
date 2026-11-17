@@ -36,6 +36,16 @@ pendiente de decisión de negocio. Para persistir una alerta se utiliza la sever
 configurada en la regla activa, compatible con los valores admitidos por
 PostgreSQL (`low`, `medium`, `high`, `critical`).
 
+Antes de evaluar un evento, el Worker exige que la regla esté activa, que
+`min_absolute_temp < max_absolute_temp`, `tolerance_time_min > 0` y que
+`severity` sea uno de los valores admitidos por PostgreSQL. Una regla activa
+inválida detiene el procesamiento sin confirmar el offset.
+
+Si una cámara no tiene una regla activa (porque no tiene reglas o todas están
+inactivas), el Worker registra una advertencia, omite el evento sin evaluar ni
+crear una alerta, y confirma el offset. Por lo tanto, el Worker nunca genera una
+alerta sin una regla HACCP activa asociada.
+
 Los mensajes inválidos y los rechazos permanentes de datos o restricciones de
 PostgreSQL se registran, se descartan y se confirma su offset para evitar que
 bloqueen el grupo. Los fallos transitorios de base de datos reciben hasta tres
