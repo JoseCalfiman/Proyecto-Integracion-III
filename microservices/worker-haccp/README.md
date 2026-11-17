@@ -29,12 +29,14 @@ El Worker no crea tablas ni ejecuta migraciones: el esquema debe estar
 provisionado antes de iniciarlo.
 
 Las reglas activas se filtran por `active` y, si hay varias para una cámara, se
-selecciona la de `review_date` más reciente, igual que el criterio de consulta
-de reglas de Ingesta. Si dos reglas activas empatan en `review_date`, el orden
-elegido por la base de datos no está definido; un criterio de desempate sigue
-pendiente de decisión de negocio. Para persistir una alerta se utiliza la severidad
-configurada en la regla activa, compatible con los valores admitidos por
-PostgreSQL (`low`, `medium`, `high`, `critical`).
+selecciona la de `review_date` más reciente. Si dos reglas activas empatan en
+`review_date`, el orden elegido por la base de datos no está definido; un
+criterio de desempate sigue pendiente de decisión de negocio. La ruta GET de
+reglas de Ingesta actualmente selecciona por fecha sin filtrar por `active`, por
+lo que puede mostrar una regla distinta si la más reciente está inactiva. Para
+persistir una alerta se utiliza la severidad configurada en la regla activa,
+compatible con los valores admitidos por PostgreSQL (`low`, `medium`, `high`,
+`critical`).
 
 Antes de evaluar un evento, el Worker exige que la regla esté activa, que
 `min_absolute_temp < max_absolute_temp`, `tolerance_time_min > 0` y que
@@ -70,6 +72,11 @@ offset.
 
 Sin regla activa o sin infracción, no persiste ni publica y confirma el offset.
 Una regla activa inválida detiene el procesamiento sin confirmar el offset.
+Las alertas nuevas nacen en estado `active` y reciben una auditoría `created`
+en la misma transacción; los datos de reconocimiento y resolución quedan vacíos
+hasta que el técnico gestione esos estados por la API. Si se reprocesa una
+predicción cuya alerta ya está `resolved`, el Worker reutiliza y publica el
+registro existente sin cambiar sus campos ni añadir auditorías.
 
 ## Persistencia de `generated_alerts` (tarea 51)
 
@@ -143,8 +150,9 @@ prueba de integración ejecutada durante el cierre documental de la tarea 51.
 ## Ejecutar con Docker
 
 ```bash
-docker build -t worker-haccp .
-docker run --rm --env-file .env worker-haccp
+# Desde la raíz del repositorio
+docker build -t worker-haccp -f microservices/worker-haccp/Dockerfile microservices/worker-haccp
+docker run --rm --env-file .env -p 8080:8080 worker-haccp
 ```
 
 ## Dependencias

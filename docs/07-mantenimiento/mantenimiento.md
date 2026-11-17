@@ -24,7 +24,6 @@ Definir cómo se mantiene el sistema tras la entrega (ISO/IEC/IEEE 14764).
 
 - `.env` no versionado (documentar en `.env.example`).
 - `Dockerfile` del dashboard vacío.
-- Inconsistencia Redis vs. Kafka en el README de `worker-haccp`.
 
 ## 4. Estrategia
 

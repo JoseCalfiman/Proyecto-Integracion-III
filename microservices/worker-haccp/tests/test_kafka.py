@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -218,8 +219,17 @@ def test_process_alert_persists_rule_configured_severity(monkeypatch):
     assert saved_alert is not None
     assert saved_alert.id_haccp_rule == rule_id
     assert saved_alert.severity == "high"
+    assert saved_alert.status == "active"
+    assert saved_alert.id_user_acknowledged is None
+    assert saved_alert.acknowledgment_date is None
+    assert saved_alert.id_user_resolved is None
+    assert saved_alert.resolution_date is None
     assert saved_audit is not None
     assert saved_audit.id_alert == saved_alert.id_alert
+    assert saved_audit.id_user is None
+    assert saved_audit.action == "created"
+    assert saved_audit.detail
+    assert saved_audit.action_date is not None
     topic, published_payload = published[0]
     assert topic == "haccp.alerts"
     assert published_payload["severity"] == "high"
@@ -271,6 +281,112 @@ def test_repeated_prediction_reuses_alert_and_audit(monkeypatch):
     assert published[0]["message"] == published[1]["message"] == alerts[0].message
     assert "Nivel de riesgo: MEDIO" in alerts[0].message
     assert "ID de predicción: 17" in alerts[0].message
+
+
+def test_reprocessing_resolved_alert_preserves_lifecycle_and_audit(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    chamber_id = UUID(CHAMBER_ID)
+    acknowledged_user_id = UUID("55555555-5555-5555-5555-555555555555")
+    resolved_user_id = UUID("66666666-6666-6666-6666-666666666666")
+    generated_at = datetime(2026, 1, 1, 10, 0)
+    acknowledged_at = datetime(2026, 1, 1, 10, 5)
+    resolved_at = datetime(2026, 1, 1, 10, 10)
+
+    with Session(engine) as session:
+        session.add_all(
+            [
+                Chamber(id_chamber=chamber_id),
+                Prediction(id_prediction=17),
+                User(id_user=acknowledged_user_id),
+                User(id_user=resolved_user_id),
+            ]
+        )
+        session.flush()
+        alert = GeneratedAlert(
+            id_chamber=chamber_id,
+            id_prediction=17,
+            alert_type="haccp_violation",
+            severity="high",
+            status="resolved",
+            message="Alerta ya resuelta",
+            generation_date=generated_at,
+            id_user_acknowledged=acknowledged_user_id,
+            acknowledgment_date=acknowledged_at,
+            id_user_resolved=resolved_user_id,
+            resolution_date=resolved_at,
+        )
+        session.add(alert)
+        session.flush()
+        alert_id = alert.id_alert
+        session.add_all(
+            [
+                AlertAudit(
+                    id_alert=alert_id,
+                    action="created",
+                    detail="Alerta creada",
+                    action_date=generated_at,
+                ),
+                AlertAudit(
+                    id_alert=alert_id,
+                    id_user=acknowledged_user_id,
+                    action="acknowledged",
+                    detail="Técnico reconoció la alerta",
+                    action_date=acknowledged_at,
+                ),
+                AlertAudit(
+                    id_alert=alert_id,
+                    id_user=resolved_user_id,
+                    action="resolved",
+                    detail="Técnico resolvió la alerta",
+                    action_date=resolved_at,
+                ),
+            ]
+        )
+        session.commit()
+
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    published = []
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", published.append)
+    consumer = FakeKafkaConsumer()
+    _handle_kafka_message(
+        consumer,
+        FakeKafkaMessage(
+            json.dumps(valid_anomaly_payload()).encode("utf-8"),
+            46,
+        ),
+    )
+
+    with Session(engine) as session:
+        saved_alert = session.get(GeneratedAlert, alert_id)
+        audits = session.scalars(
+            select(AlertAudit)
+            .where(AlertAudit.id_alert == alert_id)
+            .order_by(AlertAudit.id_audit)
+        ).all()
+
+    assert consumer.committed_offsets == [46]
+    assert saved_alert is not None
+    assert saved_alert.status == "resolved"
+    assert saved_alert.generation_date == generated_at
+    assert saved_alert.message == "Alerta ya resuelta"
+    assert saved_alert.id_user_acknowledged == acknowledged_user_id
+    assert saved_alert.acknowledgment_date == acknowledged_at
+    assert saved_alert.id_user_resolved == resolved_user_id
+    assert saved_alert.resolution_date == resolved_at
+    assert [audit.action for audit in audits] == [
+        "created",
+        "acknowledged",
+        "resolved",
+    ]
+    assert len(audits) == 3
+    assert [(audit.id_user, audit.action_date) for audit in audits] == [
+        (None, generated_at),
+        (acknowledged_user_id, acknowledged_at),
+        (resolved_user_id, resolved_at),
+    ]
+    assert published[0]["id_alert"] == alert_id
+    assert published[0]["status"] == "resolved"
 
 
 def test_distinct_predictions_create_independent_alerts(monkeypatch):
