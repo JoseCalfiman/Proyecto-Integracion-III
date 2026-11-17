@@ -12,6 +12,34 @@ logger = logging.getLogger(__name__)
 # Minimo de observaciones diarias para poder ajustar Prophet.
 MIN_DAILY_POINTS = 2
 
+
+def summarize_consumption_window(df: pd.DataFrame | None) -> dict[str, float | int]:
+    """Devuelve el resumen estadistico de los consumos validos de una ventana."""
+    if not isinstance(df, pd.DataFrame) or "y" not in df.columns:
+        values = pd.Series(dtype=float)
+    else:
+        values = pd.to_numeric(df["y"], errors="coerce")
+        values = values[np.isfinite(values.to_numpy(dtype=float))]
+
+    if values.empty:
+        return {
+            "n": 0,
+            "mean": 0.0,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0,
+            "std": 0.0,
+        }
+
+    return {
+        "n": int(values.size),
+        "mean": float(values.mean()),
+        "median": float(values.median()),
+        "min": float(values.min()),
+        "max": float(values.max()),
+        "std": float(values.std(ddof=1)) if values.size > 1 else 0.0,
+    }
+
 def build_example_df(
     periods: int = 120,
     start: str = "2024-01-01",

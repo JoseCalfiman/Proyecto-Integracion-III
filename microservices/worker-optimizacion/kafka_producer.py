@@ -58,6 +58,7 @@ def build_recommendation(
     predicted_kwh_lower: float | None = None,
     predicted_kwh_upper: float | None = None,
     id_price: int | None = None,
+    window_summary: dict[str, Any] | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """Construye el evento con el contrato de ``optimization.reports``."""
@@ -134,6 +135,7 @@ def build_recommendation(
         "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "projected_daily_cost": projected_daily_cost,
         "high_cost_window": high_cost_window or DEFAULT_HIGH_COST_WINDOW,
+        "window_summary": window_summary,
         "estimated_savings": total_savings,
         "recommendations": recommendations,
     }

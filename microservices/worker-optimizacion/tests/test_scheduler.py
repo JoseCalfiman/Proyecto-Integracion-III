@@ -105,6 +105,14 @@ def test_run_optimization_persists_then_publishes(monkeypatch):
     assert "generated_at" in report
     assert report["id_price"] == 7
     assert report["estimated_savings"] == 2465.0
+    assert report["window_summary"] == {
+        "n": 2,
+        "mean": 125.0,
+        "median": 125.0,
+        "min": 120.0,
+        "max": 130.0,
+        "std": 7.0710678118654755,
+    }
     assert forecast_inputs[0].to_dict("records") == [
         {"ds": date(2024, 1, 6), "y": 120.0},
         {"ds": date(2024, 1, 7), "y": 130.0},
@@ -237,6 +245,7 @@ def test_run_optimization_does_not_publish_when_persistence_fails(monkeypatch, c
         sched.db,
         "get_consumption_history",
         lambda days: [
+            {"date": date(2024, 1, 6), "consumption_kwh": 120.0},
             {"date": date(2024, 1, 7), "consumption_kwh": 130.0},
         ],
     )

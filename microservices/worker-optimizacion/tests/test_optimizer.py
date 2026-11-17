@@ -6,6 +6,7 @@ from optimizer import (
     forecast_daily_consumption,
     forecast_example,
     prepare_prophet_history,
+    summarize_consumption_window,
 )
 
 
@@ -67,6 +68,30 @@ def test_prepare_prophet_history_returns_none_when_data_is_missing():
     assert prepare_prophet_history(one_day) is None
     missing = pd.DataFrame({"ds": [pd.NaT, "2024-01-02"], "y": [1.0, None]})
     assert prepare_prophet_history(missing) is None
+
+
+def test_summarize_consumption_window_returns_basic_statistics():
+    summary = summarize_consumption_window(
+        pd.DataFrame({"y": [2.0, 4.0, 6.0, float("nan"), "invalid"]})
+    )
+
+    assert summary["n"] == 3
+    assert summary["mean"] == 4.0
+    assert summary["median"] == 4.0
+    assert summary["min"] == 2.0
+    assert summary["max"] == 6.0
+    assert summary["std"] == 2.0
+
+
+def test_summarize_consumption_window_is_zeroed_when_data_is_insufficient():
+    assert summarize_consumption_window(pd.DataFrame({"y": [None]})) == {
+        "n": 0,
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "std": 0.0,
+    }
 
 
 def test_prophet_receives_daily_history_and_forecasts_next_day(monkeypatch):

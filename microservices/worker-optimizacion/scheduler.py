@@ -12,7 +12,7 @@ import db
 from buffer import ReadingsBuffer, get_buffer
 from health import health
 from kafka_producer import build_recommendation, publish_report
-from optimizer import forecast_daily_consumption
+from optimizer import forecast_daily_consumption, summarize_consumption_window
 from price import get_current_quote
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,15 @@ def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
             "[scheduler] historial de BD vacío; "
             "se usa el buffer de lecturas"
         )
+
+    window_summary = summarize_consumption_window(df)
+    logger.info("[scheduler] resumen de ventana de consumo: %s", window_summary)
+    if window_summary["n"] < 2:
+        logger.warning(
+            "[scheduler] datos insuficientes para optimizar: %d observacion(es)",
+            window_summary["n"],
+        )
+        return None
 
     forecast = forecast_daily_consumption(
         df,
@@ -124,6 +133,7 @@ def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
         price_kwh=float(quote["price_kwh"]),
         high_cost_window=HIGH_COST_WINDOW,
         id_price=int(id_price) if id_price is not None else None,
+        window_summary=window_summary,
     )
 
     # Primero persistir, luego publicar. La base de datos es la fuente que
