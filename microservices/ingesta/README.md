@@ -215,3 +215,34 @@ y contrasta todas las métricas con estos cálculos manuales:
 
 También verifica separación entre cámaras, valores nulos, intervalos vacíos,
 un solo dato, zonas horarias, límites inclusivos y validación de parámetros.
+
+### Resumen para gerente (D5)
+
+`GET /api/v1/stats/summary?desde=2026-10-24&hasta=2026-10-25&top=10`
+
+Usa la autenticación y las reglas de fechas de D4. `desde` y `hasta` son
+obligatorios; `top` es opcional (10 por defecto, entre 1 y 100).
+
+- `chambers`: todas las cámaras activas, ordenadas por UUID, con `id_chamber`,
+  `name`, estadísticas D4 en `temperature` y `consumption_kw`,
+  `consumption_total_kw`, `alerts`, `critical_alerts` y `pending_recommendations`.
+- `consumption_total_kw`: suma de muestras no nulas del período. Es una suma
+  de potencia registrada, **no energía en kWh**; depende de la frecuencia de
+  muestreo. Sin muestras válidas devuelve `null`, al igual que las medias.
+- `alerts`: alertas generadas en el período, cualquiera sea su estado actual;
+  `critical_alerts`: subconjunto con severidad `critical`.
+- `pending_recommendations`: recomendaciones creadas en el período cuyo estado
+  actual es `pending`; no reconstruye el estado histórico al cierre del rango.
+- `rankings.top_alerts` y `rankings.top_consumption`: hasta `top` entradas con
+  `id_chamber`, `name` y `value`, orden descendente por número de alertas y suma
+  de consumo, respectivamente. Los empates se resuelven por UUID ascendente.
+  Las cámaras sin consumo válido se excluyen del ranking de consumo; las que
+  tienen cero alertas sí participan en el de alertas.
+
+La suite `test_stats.py` comprueba diez cámaras activas con datos sintéticos,
+una inactiva, rankings con valores esperados, empates, rangos, nulos y filtros
+inválidos. Ejecutar con el comando de D4. La validación con datos reales requiere
+la base de desarrollo en ejecución: contrastar `chambers` con las cámaras
+activas y los rankings con `COUNT(*)` de `generated_alerts` y
+`SUM(consumption_kw)` de `sensor_data`, filtrados por el mismo período y
+ordenados por valor descendente e `id_chamber` ascendente.

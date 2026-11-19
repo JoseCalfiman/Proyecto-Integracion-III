@@ -274,3 +274,27 @@ class GeminiChatResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: str = Field(max_length=150)
     password: SecretStr
+
+
+class ChamberSummary(ChamberStats):
+    name: Optional[str] = None
+    consumption_total_kw: Optional[float] = None
+    alerts: int
+    critical_alerts: int
+    pending_recommendations: int
+
+
+class StatsRankingEntry(BaseModel):
+    id_chamber: UUID
+    name: Optional[str] = None
+    value: float
+
+
+class StatsRankings(BaseModel):
+    top_alerts: list[StatsRankingEntry]
+    top_consumption: list[StatsRankingEntry]
+
+
+class StatsSummary(BaseModel):
+    chambers: list[ChamberSummary]
+    rankings: StatsRankings
