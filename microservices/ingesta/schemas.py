@@ -74,6 +74,24 @@ class HistoricalMeasurement(BaseModel):
     consumption_kw: Optional[float] = None
 
 
+class DescriptiveStats(BaseModel):
+    n: int
+    media: Optional[float] = None
+    mediana: Optional[float] = None
+    minimo: Optional[float] = None
+    maximo: Optional[float] = None
+    desviacion_estandar: Optional[float] = None
+    q1: Optional[float] = None
+    q3: Optional[float] = None
+    iqr: Optional[float] = None
+
+
+class ChamberStats(BaseModel):
+    id_chamber: UUID
+    temperature: DescriptiveStats
+    consumption_kw: DescriptiveStats
+
+
 class SensorDataRead(SensorDataCreate):
     """Lectura tal como se devuelve desde la base de datos."""
 

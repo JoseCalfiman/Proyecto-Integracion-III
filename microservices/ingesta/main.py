@@ -14,6 +14,7 @@ from routes import (
     gemini,
     optimizacion,
     predictions,
+    stats,
 )
 
 from mqtt_client import (
@@ -54,7 +55,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 for router in (dashboard.router, haccp.router, alerts.router, chambers.router,
-               gemini.router, optimizacion.router, predictions.router, historial.router):
+               gemini.router, optimizacion.router, predictions.router, historial.router, stats.router):
     app.include_router(router, prefix="/api/v1", dependencies=[Depends(shared)])
 
 

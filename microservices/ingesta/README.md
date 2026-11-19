@@ -173,3 +173,45 @@ Pruebas focalizadas de consultas y contrato, sin servicios externos:
 ```bash
 venv/bin/python -m unittest discover -s microservices/ingesta/tests -p test_predictions.py
 ```
+
+### D4: estadísticas descriptivas por cámara
+
+`GET /api/v1/stats/chambers/{id_chamber}?desde=2026-10-24&hasta=2026-10-25`
+
+Requiere la misma autenticación que historial. UUID y ambos filtros son obligatorios.
+Las fechas usan las mismas reglas UTC de historial: `hasta` sin hora abarca el día
+completo; con hora incluye el instante indicado. Filtros inválidos devuelven 422.
+Se consideran todas las lecturas del intervalo, sin límite ni paginación.
+
+El JSON contiene `id_chamber`, `temperature` (°C) y `consumption_kw` (kW).
+Cada variable incluye `n`, `media`, `mediana`, `minimo`, `maximo`,
+`desviacion_estandar`, `q1`, `q3` e `iqr`. Los nulos se excluyen por variable;
+`n` puede ser distinto entre temperatura y consumo. Una cámara sin lecturas
+(incluso un UUID inexistente) devuelve 200, `n=0` y métricas `null`.
+Un solo dato devuelve desviación e IQR iguales a cero.
+
+Convenciones: desviación poblacional `sqrt(sum((x-media)^2)/n)`; cuartiles
+por interpolación lineal en la posición `(n-1)*p` del vector ordenado, con
+índices desde cero (`p=0.25` y `0.75`, equivalente a `percentile_cont` de
+PostgreSQL). `iqr=q3-q1`. No se redondea antes de responder. Estas convenciones
+quedan pendientes de contraste con `Capitulo_1.pdf`, que no está en el repositorio.
+El consumo se resume como potencia en kW, sin convertirlo a energía en kWh.
+
+Validación reproducible, sin modificar la base de desarrollo:
+
+```bash
+venv/bin/python -B -m unittest discover -s microservices/ingesta/tests -p test_stats.py -v
+```
+
+La prueba HTTP carga en SQLite la cámara `55555555-5555-5555-5555-555555555555`
+y contrasta todas las métricas con estos cálculos manuales:
+
+| Rango UTC | Variable y datos no nulos | n | Media | Mediana | Mín. | Máx. | Desv. poblacional | Q1 | Q3 | IQR |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-24 | T: -20, -18, -16 | 3 | -18 | -18 | -20 | -16 | √(8/3) | -19 | -17 | 2 |
+| 2026-10-24 | C: 1, 2, 3 | 3 | 2 | 2 | 1 | 3 | √(2/3) | 1.5 | 2.5 | 1 |
+| 2026-10-24 a 2026-10-25 | T: -20, -18, -16, -14 | 4 | -17 | -17 | -20 | -14 | √5 | -18.5 | -15.5 | 3 |
+| 2026-10-24 a 2026-10-25 | C: 1, 2, 3, 4, 5 | 5 | 3 | 3 | 1 | 5 | √2 | 2 | 4 | 2 |
+
+También verifica separación entre cámaras, valores nulos, intervalos vacíos,
+un solo dato, zonas horarias, límites inclusivos y validación de parámetros.
