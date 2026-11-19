@@ -15,6 +15,7 @@ from routes import (
     optimizacion,
     predictions,
     stats,
+    panel,
 )
 
 from mqtt_client import (
@@ -52,6 +53,7 @@ app.add_middleware(
 # ROUTERS
 # ============================================================
 
+app.include_router(panel.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 for router in (dashboard.router, haccp.router, alerts.router, chambers.router,

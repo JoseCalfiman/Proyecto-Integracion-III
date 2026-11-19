@@ -246,3 +246,31 @@ la base de desarrollo en ejecución: contrastar `chambers` con las cámaras
 activas y los rankings con `COUNT(*)` de `generated_alerts` y
 `SUM(consumption_kw)` de `sensor_data`, filtrados por el mismo período y
 ordenados por valor descendente e `id_chamber` ascendente.
+
+### Panel técnico (D6)
+
+Las cuatro rutas `/api/v1/panel/{gateways,alertas,sensores,health}` requieren
+Bearer de un usuario activo con rol `tecnico` (401 sin token, 403 para gerente).
+
+- `gateways`: array de todas las cámaras, incluidas inactivas; `id` es
+  `chambers.id_chamber`, `sensores` cuenta sensores asociados. No existe tabla
+  de gateways/MCUs: se representa la cámara, sin generar dispositivos.
+  `estado=unknown` y `ping_ms=null`: no hay heartbeat ni ping medido.
+  `ultima_conexion` conserva el nombre del contrato visual, pero representa
+  exclusivamente el máximo `sensor_data.timestamp` de la cámara, no un ping.
+- `sensores`: array de `sensors`, con `id=id_sensor`, estado administrativo
+  original, cámara y datos de inventario. `ultima_lectura` usa únicamente
+  lecturas asociadas por `id_sensor`; no atribuye lecturas de cámara sin sensor.
+  `bateria=null` porque no existe esa telemetría.
+- `alertas`: array de todas las alertas registradas, incluidos estados resueltos,
+  ordenado por fecha descendente (nulos al final) e ID descendente. Conserva
+  ID, cámara, severidad (`codigo`), estado y mensaje originales.
+- `health`: HTTP 200 con `status=ok|degraded`, `checked_at` UTC y `checks` de
+  DB/Kafka/MQTT. DB y Kafka reutilizan las comprobaciones acotadas de `/ready`;
+  MQTT refleja `is_connected()` del cliente real de este proceso. No afirma
+  conocer la salud de todos los microservicios. Un fallo se informa como `error`.
+
+Las consultas de inventario no convierten errores de base de datos en arrays
+vacíos. Un array vacío significa que no hay registros. La pantalla elimina los
+mocks, el uptime fijo y el gráfico de tráfico ficticio; los datos no disponibles
+se indican explícitamente. No se requieren migraciones ni modelos nuevos.

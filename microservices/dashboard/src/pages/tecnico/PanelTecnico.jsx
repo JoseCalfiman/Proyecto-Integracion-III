@@ -1,57 +1,23 @@
 import React, { useState } from 'react';
 import {
-  Wrench, RefreshCw, Server, CheckCircle2, XCircle, AlertTriangle,
+  Wrench, RefreshCw, Server,
   Wifi, WifiOff, Thermometer, Droplet, DoorOpen,
   Bell, HelpCircle, Download, User, MoreVertical,
   Eye,
 } from 'lucide-react';
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-} from 'recharts';
 import { useFetch } from '../../hooks/useApi';
 import EstadoSistema from '../../components/shared/EstadoSistema';
 import {
-  getGateways, getAlertasSistema, getTraficoRed,
+  getGateways, getAlertasSistema,
   getSensores, verificarSalud,
 } from '../../api/panelTecnico';
-
-// ============================================================
-// DATOS MOCK (fallback mientras Diego no tenga los endpoints)
-// ============================================================
-const MOCK_GATEWAYS = [
-  { id: 'GTW-NORTE-01', nombre: 'Cámara Principal 01', estado: 'online', ping_ms: 12 },
-  { id: 'SN-902', nombre: 'Cámara Congelación', estado: 'offline', ultima_conexion: 'Hace 42m' },
-  { id: 'GTW-SUR-03', nombre: 'Túnel de Enfriamiento', estado: 'online', ping_ms: 18 },
-];
-
-const MOCK_ALERTAS = [
-  { id: 1, tipo: 'critica', codigo: 'CRITICAL', mensaje: 'Gateway SN-902 offline. Fallo de heartbeat.', fecha: '10:42 AM' },
-  { id: 2, tipo: 'advertencia', codigo: 'WARNING', mensaje: 'Sensor SN-102 (Cámara 4) calibración vencida hace 3 días.', fecha: '09:15 AM' },
-  { id: 3, tipo: 'info', codigo: 'INFO', mensaje: 'Backup de base de datos completado exitosamente (1.2GB).', fecha: '03:00 AM' },
-  { id: 4, tipo: 'advertencia', codigo: 'WARNING', mensaje: 'Latencia alta detectada en nodo Edge-02 (>500ms).', fecha: '7:45 PM' },
-];
-
-const MOCK_TRAFICO = [
-  { hora: '-6h', rx: 120, tx: 80 },
-  { hora: '-5h', rx: 180, tx: 120 },
-  { hora: '-4h', rx: 240, tx: 160 },
-  { hora: '-3h', rx: 200, tx: 140 },
-  { hora: '-2h', rx: 280, tx: 190 },
-  { hora: '-1h', rx: 260, tx: 170 },
-  { hora: 'Ahora', rx: 240, tx: 150 },
-];
-
-const MOCK_SENSORES = [
-  { id: 'SN-101', ubicacion: 'Cámara Principal A', tipo: 'Temp/Hum', bateria: 98, ultima_lectura: 'Hace 2s', estado: 'ok' },
-  { id: 'SN-102', ubicacion: 'Cámara 4 (Congelados)', tipo: 'Temp PT100', bateria: 74, ultima_lectura: 'Hace 1m', estado: 'calibracion' },
-  { id: 'SN-103', ubicacion: 'Pre-Cámara Sur', tipo: 'Apertura Puerta', bateria: 32, ultima_lectura: 'Hace 14d', estado: 'ok' },
-];
 
 // ============================================================
 // CONFIGURACIÓN DE COLORES
 // ============================================================
 const gatewayConfig = {
   online: { color: 'green', icon: Wifi, label: 'Online' },
+  unknown: { color: 'gray', icon: HelpCircle, label: 'Sin telemetría de conexión' },
   offline: { color: 'red', icon: WifiOff, label: 'Offline' },
 };
 
@@ -72,19 +38,19 @@ const sensorIcono = {
 // ============================================================
 const PanelTecnico = () => {
   const [verificando, setVerificando] = useState(false);
+  const [salud, setSalud] = useState(null);
 
   // ==========================================================
   // CARGAR DATOS DESDE LA API
   // ==========================================================
-  const { data: gateways } = useFetch(getGateways, [], MOCK_GATEWAYS);
-  const { data: alertas } = useFetch(getAlertasSistema, [], MOCK_ALERTAS);
-  const { data: trafico } = useFetch(getTraficoRed, [], MOCK_TRAFICO);
-  const { data: sensores, reload: reloadSensores } = useFetch(getSensores, [], MOCK_SENSORES);
+  const { data: gateways, error: errorGateways, loading: loadingGateways, reload: reloadGateways } = useFetch(getGateways);
+  const { data: alertas, error: errorAlertas, loading: loadingAlertas, reload: reloadAlertas } = useFetch(getAlertasSistema);
+  const { data: sensores, error: errorSensores, loading: loadingSensores, reload: reloadSensores } = useFetch(getSensores);
 
   const listaGateways = Array.isArray(gateways) ? gateways : [];
   const listaAlertas = Array.isArray(alertas) ? alertas : [];
   const listaSensores = Array.isArray(sensores) ? sensores : [];
-  const datosTrafico = Array.isArray(trafico) && trafico.length > 0 ? trafico : MOCK_TRAFICO;
+
 
   // ==========================================================
   // VERIFICAR SALUD
@@ -92,9 +58,12 @@ const PanelTecnico = () => {
   const verificarSaludSistema = async () => {
     setVerificando(true);
     try {
-      await verificarSalud();
+      setSalud(await verificarSalud());
+      reloadGateways();
+      reloadAlertas();
       reloadSensores();
     } catch (err) {
+      setSalud(null);
       alert('No se pudo verificar la salud del sistema.');
     } finally {
       setVerificando(false);
@@ -133,6 +102,10 @@ const PanelTecnico = () => {
 
       {/* ESTADO DEL SISTEMA (System Controller) */}
       <EstadoSistema />
+      {(errorGateways || errorAlertas || errorSensores) && (
+        <p role="alert" className="text-red-600 mb-4">{[errorGateways, errorAlertas, errorSensores].filter(Boolean).join(' · ')}</p>
+      )}
+      {salud && <p role="status" className="mb-4">Salud de ingesta: {salud.status} — {Object.entries(salud.checks).map(([name, status]) => `${name}: ${status}`).join(' · ')}</p>}
 
       {/* ==================================================== */}
       {/* SECCIÓN 1: GATEWAYS + ALERTAS */}
@@ -146,10 +119,6 @@ const PanelTecnico = () => {
               <h2 className="font-semibold text-gray-800">Estado de Gateways</h2>
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-3 py-1 rounded-full">
-                <CheckCircle2 size={12} />
-                98.9% UPTIME
-              </span>
               <button
                 onClick={verificarSaludSistema}
                 disabled={verificando}
@@ -161,10 +130,11 @@ const PanelTecnico = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {!loadingGateways && !errorGateways && listaGateways.length === 0 && <p>No hay cámaras registradas.</p>}
             {listaGateways.map((g) => {
-              const config = gatewayConfig[g.estado] || gatewayConfig.offline;
+              const config = gatewayConfig[g.estado] || gatewayConfig.unknown;
               const Icon = config.icon;
-              const borderColor = g.estado === 'online' ? 'border-green-200' : 'border-red-200';
+              const borderColor = 'border-gray-200';
 
               return (
                 <div key={g.id} className={`border ${borderColor} rounded-lg p-4`}>
@@ -172,19 +142,19 @@ const PanelTecnico = () => {
                     <span className="text-xs font-mono text-gray-500">{g.id}</span>
                     <Icon
                       size={16}
-                      className={g.estado === 'online' ? 'text-green-600' : 'text-red-600'}
+                      className={g.estado === 'online' ? 'text-green-600' : 'text-gray-600'}
                     />
                   </div>
                   <p className="text-sm font-medium text-gray-700 mb-1">{g.nombre}</p>
                   <p
                     className={`text-lg font-bold ${
-                      g.estado === 'online' ? 'text-green-600' : 'text-red-600'
+                      g.estado === 'online' ? 'text-green-600' : 'text-gray-600'
                     }`}
                   >
                     {config.label}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    {g.estado === 'online' ? `${g.ping_ms}ms ping` : g.ultima_conexion}
+                    Última lectura: {g.ultima_conexion || 'Sin registros'} · {g.sensores} sensores · {g.active === true ? 'Activa' : g.active === false ? 'Inactiva' : 'Estado no registrado'}
                   </p>
                 </div>
               );
@@ -200,11 +170,12 @@ const PanelTecnico = () => {
               <h2 className="font-semibold text-gray-800">Alertas del Sistema</h2>
             </div>
             <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-              {listaAlertas.length} Nuevas
+              {listaAlertas.length} Registradas
             </span>
           </div>
 
           <div className="space-y-3">
+            {!loadingAlertas && !errorAlertas && listaAlertas.length === 0 && <p>No hay alertas registradas.</p>}
             {listaAlertas.map((a) => {
               const config = alertaConfig[a.tipo] || alertaConfig.info;
               return (
@@ -254,45 +225,7 @@ const PanelTecnico = () => {
             </div>
           </div>
 
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={datosTrafico}>
-              <defs>
-                <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="hora" stroke="#9ca3af" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="rx"
-                stroke="#10b981"
-                fill="url(#colorRx)"
-                strokeWidth={2}
-              />
-              <Area
-                type="monotone"
-                dataKey="tx"
-                stroke="#3b82f6"
-                fill="url(#colorTx)"
-                strokeWidth={2}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+          <p className="text-gray-500">No hay telemetría de tráfico de red disponible.</p>
         </div>
 
         {/* Menú de calibración (1/3) */}
@@ -360,10 +293,9 @@ const PanelTecnico = () => {
             </tr>
           </thead>
           <tbody>
+            {!loadingSensores && !errorSensores && listaSensores.length === 0 && <tr><td colSpan={6} className="px-6 py-3">No hay sensores registrados.</td></tr>}
             {listaSensores.map((s) => {
               const IconSensor = sensorIcono[s.tipo] || Thermometer;
-              const bateriaColor =
-                s.bateria > 70 ? 'bg-green-500' : s.bateria > 40 ? 'bg-yellow-500' : 'bg-red-500';
 
               return (
                 <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50">
@@ -371,7 +303,7 @@ const PanelTecnico = () => {
                     <div className="flex items-center gap-2">
                       <span
                         className={`w-2 h-2 rounded-full ${
-                          s.estado === 'ok' ? 'bg-green-500' : 'bg-yellow-500'
+                          s.estado === 'active' ? 'bg-green-500' : 'bg-yellow-500'
                         }`}
                       ></span>
                       <span className="font-mono text-xs text-gray-700">{s.id}</span>
@@ -389,15 +321,7 @@ const PanelTecnico = () => {
                     </span>
                   </td>
                   <td className="px-6 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 bg-gray-200 rounded-full h-1.5">
-                        <div
-                          className={`h-1.5 rounded-full ${bateriaColor}`}
-                          style={{ width: `${s.bateria}%` }}
-                        ></div>
-                      </div>
-                      <span className="text-xs text-gray-600">{s.bateria}%</span>
-                    </div>
+                    <span>{s.bateria == null ? 'Sin dato' : `${s.bateria}%`}</span>
                   </td>
                   <td className="px-6 py-3 text-xs">
                     {s.estado === 'calibracion' ? (
@@ -405,7 +329,7 @@ const PanelTecnico = () => {
                         ⚠ Calibración requerida
                       </span>
                     ) : (
-                      <span className="text-gray-500">{s.ultima_lectura}</span>
+                      <span className="text-gray-500">{s.ultima_lectura || 'Sin lecturas asociadas'}</span>
                     )}
                   </td>
                   <td className="px-6 py-3">

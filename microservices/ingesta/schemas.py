@@ -298,3 +298,42 @@ class StatsRankings(BaseModel):
 class StatsSummary(BaseModel):
     chambers: list[ChamberSummary]
     rankings: StatsRankings
+
+
+class PanelGateway(BaseModel):
+    id: UUID
+    nombre: Optional[str] = None
+    active: Optional[bool] = None
+    estado: Literal["unknown"] = "unknown"
+    ping_ms: None = None
+    ultima_conexion: Optional[datetime] = None
+    sensores: int
+
+
+class PanelSensor(BaseModel):
+    id: int
+    id_chamber: Optional[UUID] = None
+    ubicacion: Optional[str] = None
+    tipo: Optional[str] = None
+    modelo: Optional[str] = None
+    mqtt_identifier: Optional[str] = None
+    estado: Optional[str] = None
+    bateria: None = None
+    ultima_lectura: Optional[datetime] = None
+
+
+class PanelAlert(BaseModel):
+    id: int
+    id_chamber: Optional[UUID] = None
+    tipo: Literal["critica", "advertencia", "info"]
+    codigo: str
+    mensaje: Optional[str] = None
+    fecha: Optional[datetime] = None
+    estado: str
+    alert_type: Optional[str] = None
+
+
+class PanelHealth(BaseModel):
+    status: Literal["ok", "degraded"]
+    checked_at: datetime
+    checks: dict[str, Literal["ok", "error"]]
