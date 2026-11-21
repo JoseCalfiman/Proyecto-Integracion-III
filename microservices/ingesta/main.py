@@ -1,12 +1,12 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import threading
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import threading
-
+from auth import shared
 from routes import (
+    admin,
+    auth,
+    historial,
     chambers,
     alerts,
     haccp,
@@ -14,6 +14,8 @@ from routes import (
     gemini,
     optimizacion,
     predictions,
+    stats,
+    panel,
 )
 
 from mqtt_client import (
@@ -51,33 +53,12 @@ app.add_middleware(
 # ROUTERS
 # ============================================================
 
-app.include_router(
-    dashboard.router,
-    prefix="/api/v1",
-)
-
-app.include_router(
-    haccp.router,
-    prefix="/api/v1",
-)
-
-app.include_router(
-    alerts.router,
-    prefix="/api/v1",
-)
-
-app.include_router(
-    chambers.router,
-    prefix="/api/v1",
-)
-
-app.include_router(
-    gemini.router,
-    prefix="/api/v1",
-)
-
-app.include_router(optimizacion.router, prefix="/api/v1")
-app.include_router(predictions.router, prefix="/api/v1")
+app.include_router(panel.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
+for router in (dashboard.router, haccp.router, alerts.router, chambers.router,
+               gemini.router, optimizacion.router, predictions.router, historial.router, stats.router):
+    app.include_router(router, prefix="/api/v1", dependencies=[Depends(shared)])
 
 
 # ============================================================
