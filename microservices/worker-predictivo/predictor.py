@@ -4,7 +4,7 @@ from typing import List, Optional, Union
 
 import numpy as np
 
-from descriptive_stats import calcular_estadisticas, detectar_atipicos
+from descriptive_stats import FACTOR_IQR, calcular_estadisticas, detectar_atipicos
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +117,18 @@ def evaluar_riesgo(
     if indices_atipicos:
         condiciones.append("CON_ATIPICOS")
     diagnostico = {
+        "schema_version": 1,
+        "recorded_at": timestamps[-1] if timestamps else None,
+        "reference_timestamp": tiempos_utilizables[-1] if tiempos_utilizables else None,
+        "temperature": estadisticas or None,
+        "consumption_kw": calcular_estadisticas([
+            lectura["consumption_kw"] for lectura in buffer
+            if lectura.get("consumption_kw") is not None
+        ]),
+        "std_ddof": 1,
+        "factor_iqr": FACTOR_IQR,
+        "absolute_max_temp": absolute_max_temp,
+        "umbral_alerta_minutos": umbral_alerta_minutos,
         "sample_count": len(buffer),
         "span_minutes": span_minutes,
         "std_temp": estadisticas.get("std"),

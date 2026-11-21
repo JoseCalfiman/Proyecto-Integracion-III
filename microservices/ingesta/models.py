@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, JSON, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -176,6 +176,7 @@ class Prediction(Base):
     risk_level = Column(String(20), nullable=False)
     calculation_date = Column(DateTime(timezone=True), server_default=func.now())
     id_worker = Column(String(50))
+    diagnostico = Column(JSON, nullable=True)
 
     chamber = relationship("Chamber", lazy="joined")
 

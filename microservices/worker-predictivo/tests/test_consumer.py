@@ -42,7 +42,11 @@ def worker(monkeypatch):
         kc, "obtener_regla_haccp_activa",
         lambda session, chamber_id: {"max_absolute_temp": -10.0, "tolerance_time_min": 40.0, "severity": "high"},
     )
-    monkeypatch.setattr(kc, "guardar_prediccion", lambda session, **kw: guardadas.append(kw))
+    def guardar(session, **kw):
+        guardadas.append(kw)
+        return SimpleNamespace(id_prediction=len(guardadas))
+
+    monkeypatch.setattr(kc, "guardar_prediccion", guardar)
 
     w = kc.PredictiveKafkaWorker()
     monkeypatch.setattr(w, "send_anomaly_alert", lambda payload: alertas.append(payload))
@@ -63,6 +67,19 @@ def test_lectura_valida_se_procesa(worker):
     worker._procesar_mensaje(FakeMsg(_lectura(0, -18.0)))
     assert len(worker.guardadas) == 1
     assert worker.guardadas[0]["chamber_id"] == CHAMBER
+    diagnostico = worker.guardadas[0]["diagnostico"]
+    assert diagnostico["temperature"]["media"] == -18
+    assert diagnostico["consumption_kw"]["media"] == 1
+    assert diagnostico["recorded_at"] == T0
+
+
+def test_evento_con_tendencia_publica_prediccion_y_diagnostico(worker):
+    for i, temperatura in enumerate([-18, -17, -16]):
+        worker._procesar_mensaje(FakeMsg(_lectura(i, temperatura)))
+    assert worker.guardadas[-1]["calculated_slope"] == pytest.approx(1)
+    assert worker.guardadas[-1]["diagnostico"]["sample_count"] == 3
+    assert worker.alertas[-1]["id_prediction"] == 3
+    assert worker.alertas[-1]["remaining_time_min"] == pytest.approx(6)
 
 
 def test_consumer_registra_diagnostico_y_evitar_alerta_por_spike(worker, caplog):
