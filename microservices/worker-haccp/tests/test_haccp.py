@@ -48,8 +48,8 @@ def test_predictive_event_decision_boundaries(payload, expected_violation):
 def test_predictive_event_combines_simultaneous_violations_once():
     result = evaluate_predictive_event(
         {
-            "temperature": 6,
-            "remaining_time_min": 10,
+            "temperature": 6.123456,
+            "remaining_time_min": 10.987654,
             "risk_level": "CRITICO",
             "id_prediction": 23,
         },
@@ -61,14 +61,11 @@ def test_predictive_event_combines_simultaneous_violations_once():
         "temperature_above_maximum",
         "remaining_time_within_tolerance",
     ]
-    assert "temperatura observada 6.0 °C" in result["message"]
-    assert "límites HACCP [-20.0, 5.0] °C" in result["message"]
-    assert "tiempo restante 10.0 min" in result["message"]
-    assert "tolerancia 15.0 min" in result["message"]
-    assert "superior al máximo HACCP de 5.0 °C" in result["message"]
-    assert "dentro de la tolerancia HACCP (≤ 15.0 min)" in result["message"]
-    assert "Nivel de riesgo: CRITICO" in result["message"]
-    assert "ID de predicción: 23" in result["message"]
+    assert "Temperatura: 6.123 °C (rango: [-20, 5] °C)" in result["message"]
+    assert "Tiempo restante: 10.988 min (tolerancia: 15 min)" in result["message"]
+    assert "Causas: temperatura sobre el máximo, tiempo restante dentro de la tolerancia" in result["message"]
+    assert "Riesgo: CRITICO" in result["message"]
+    assert "Predicción: 23" in result["message"]
 
 
 def test_predictive_event_message_describes_temperature_below_minimum():
@@ -78,8 +75,8 @@ def test_predictive_event_message_describes_temperature_below_minimum():
     )
 
     assert result["is_alert"] is True
-    assert "temperatura observada -20.1 °C" in result["message"]
-    assert "inferior al mínimo HACCP de -20.0 °C" in result["message"]
+    assert "Temperatura: -20.1 °C" in result["message"]
+    assert "Causas: temperatura bajo el mínimo" in result["message"]
 
 
 def test_predictive_event_message_describes_temperature_above_maximum():
@@ -89,8 +86,8 @@ def test_predictive_event_message_describes_temperature_above_maximum():
     )
 
     assert result["is_alert"] is True
-    assert "temperatura observada 5.1 °C" in result["message"]
-    assert "superior al máximo HACCP de 5.0 °C" in result["message"]
+    assert "Temperatura: 5.1 °C" in result["message"]
+    assert "Causas: temperatura sobre el máximo" in result["message"]
 
 
 def test_predictive_event_message_describes_time_within_tolerance():
@@ -100,8 +97,8 @@ def test_predictive_event_message_describes_time_within_tolerance():
     )
 
     assert result["is_alert"] is True
-    assert "tiempo restante 15.0 min" in result["message"]
-    assert "tolerancia HACCP (≤ 15.0 min)" in result["message"]
+    assert "Tiempo restante: 15 min (tolerancia: 15 min)" in result["message"]
+    assert "Causas: tiempo restante dentro de la tolerancia" in result["message"]
 
 
 def test_predictive_event_message_omits_unavailable_optional_context():

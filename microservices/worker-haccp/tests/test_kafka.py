@@ -235,8 +235,48 @@ def test_process_alert_persists_rule_configured_severity(monkeypatch):
     assert published_payload["severity"] == "high"
     assert published_payload["id_prediction"] == 17
     assert published_payload["message"] == saved_alert.message
-    assert "Nivel de riesgo: MEDIO" in saved_alert.message
-    assert "ID de predicción: 17" in saved_alert.message
+    assert "Riesgo: MEDIO" in saved_alert.message
+    assert "Predicción: 17" in saved_alert.message
+
+
+@pytest.mark.parametrize("rule_severity", ["low", "medium", "high", "critical"])
+def test_process_alert_persists_each_supported_rule_severity(
+    monkeypatch, rule_severity
+):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(bind=engine)
+    chamber_id = UUID(CHAMBER_ID)
+    with Session(engine) as session:
+        session.add(
+            HaccpRule(
+                id_chamber=chamber_id,
+                active=True,
+                severity=rule_severity,
+                max_absolute_temp=4,
+                min_absolute_temp=-30,
+                tolerance_time_min=15,
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(kafka_consumer, "get_engine", lambda: engine)
+    published = []
+    monkeypatch.setattr(kafka_consumer, "publish_haccp_alert", published.append)
+
+    kafka_consumer.process_alert(
+        valid_anomaly_payload(
+            id_chamber=CHAMBER_ID,
+            temperature=5,
+            remaining_time_min=10,
+        )
+    )
+
+    with Session(engine) as session:
+        saved_alert = session.scalar(select(GeneratedAlert))
+
+    assert saved_alert is not None
+    assert saved_alert.severity == rule_severity
+    assert published[0]["severity"] == rule_severity
 
 
 def test_repeated_prediction_reuses_alert_and_audit(monkeypatch):
@@ -279,8 +319,8 @@ def test_repeated_prediction_reuses_alert_and_audit(monkeypatch):
     assert len(published) == 2
     assert published[0]["id_alert"] == published[1]["id_alert"] == alerts[0].id_alert
     assert published[0]["message"] == published[1]["message"] == alerts[0].message
-    assert "Nivel de riesgo: MEDIO" in alerts[0].message
-    assert "ID de predicción: 17" in alerts[0].message
+    assert "Riesgo: MEDIO" in alerts[0].message
+    assert "Predicción: 17" in alerts[0].message
 
 
 def test_reprocessing_resolved_alert_preserves_lifecycle_and_audit(monkeypatch):
