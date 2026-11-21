@@ -1,7 +1,7 @@
 import apiClient from './client';
 
 // Respuesta: id_prediction, id_chamber, slope, projected_temperature,
-// remaining_time_min, risk_level y calculation_date.
+// remaining_time_min, risk_level, calculation_date y diagnostico opcional.
 export const getUltimaPrediccion = async (idChamber) => {
   try {
     const response = await apiClient.get('/predictions/latest', {

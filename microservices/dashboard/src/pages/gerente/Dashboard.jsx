@@ -3,6 +3,7 @@ import { Camera, AlertTriangle, Zap, TrendingUp, Activity } from "lucide-react";
 import MetricCard from "../../components/ui/MetricCard";
 import ConsumptionChart from "../../components/charts/ConsumptionChart";
 import ManagerAnalytics from "../../components/charts/ManagerAnalytics";
+import PredictionDiagnostics from "../../components/shared/PredictionDiagnostics";
 import { getDashboardLive, getConsumptionSeries } from "../../api/dashboard";
 
 // Resumen de negocio: sin métricas de infraestructura ni datos simulados.
@@ -125,6 +126,7 @@ const Dashboard = () => {
 
       {/* A2: análisis consultado sólo cuando el gerente abre esta sección. */}
       <ManagerAnalytics consumo={consumo} />
+      <PredictionDiagnostics />
     </div>
   );
 };

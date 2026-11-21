@@ -2,6 +2,7 @@ import React from 'react';
 import { Camera, AlertTriangle, Activity, Wrench } from 'lucide-react';
 import MetricCard from '../../components/ui/MetricCard';
 import TemperatureChart from '../../components/charts/TemperatureChart';
+import PredictionDiagnostics from '../../components/shared/PredictionDiagnostics';
 
 const Dashboard = () => {
   return (
@@ -47,6 +48,7 @@ const Dashboard = () => {
         />
       </div>
 
+      <PredictionDiagnostics detailed />
       {/* Gráfico de temperatura */}
       <div className="space-y-6">
         <TemperatureChart />

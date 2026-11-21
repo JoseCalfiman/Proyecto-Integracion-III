@@ -89,7 +89,8 @@ CREATE TABLE predictions (
   remaining_time_min NUMERIC(8,2),
   risk_level VARCHAR(20) NOT NULL CHECK (risk_level IN ('SIN_RIESGO', 'BAJO', 'MEDIO', 'ALTO', 'CRITICO')),
   calculation_date TIMESTAMPTZ DEFAULT NOW(),
-  id_worker VARCHAR(50)
+  id_worker VARCHAR(50),
+  diagnostico JSON
 );
 
 -- 5. Alertas

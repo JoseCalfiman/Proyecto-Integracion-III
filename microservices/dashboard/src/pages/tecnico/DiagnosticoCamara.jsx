@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import PredictionDiagnostics from '../../components/shared/PredictionDiagnostics';
 import {
   Activity,
   AlertTriangle,
@@ -209,6 +210,7 @@ const DiagnosticoCamara = ({ camaras = [] }) => {
           </div>
 
           <div className="space-y-5">
+            <PredictionDiagnostics idChamber={idSeleccionado} detailed />
             <section className="space-y-3" aria-label="Estadísticas de temperatura">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="font-semibold text-gray-800">Estadísticas de temperatura</h3>
