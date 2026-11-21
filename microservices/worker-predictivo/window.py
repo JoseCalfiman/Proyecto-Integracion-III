@@ -20,6 +20,7 @@ def actualizar_ventana(
     timestamp: datetime,
     temperature: float,
     ventana_minutos: float,
+    consumption_kw: float | None = None,
 ) -> bool:
     """Agrega una lectura a la ventana. Devuelve False si fue ignorada."""
     ventana = timedelta(minutes=ventana_minutos)
@@ -32,7 +33,10 @@ def actualizar_ventana(
             else:
                 return False
 
-    buffer.append({"timestamp": timestamp, "temperature": temperature})
+    lectura = {"timestamp": timestamp, "temperature": temperature}
+    if consumption_kw is not None:
+        lectura["consumption_kw"] = consumption_kw
+    buffer.append(lectura)
 
     limite_inferior = timestamp - ventana
     while buffer and buffer[0]["timestamp"] < limite_inferior:

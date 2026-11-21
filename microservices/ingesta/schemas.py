@@ -26,6 +26,46 @@ class ConsumptionForecastRead(BaseModel):
     historico: Optional[float] = None
 
 
+class WindowStatistics(BaseModel):
+    sample_count: int
+    media: Optional[float] = None
+    mediana: Optional[float] = None
+    std: Optional[float] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    q1: Optional[float] = None
+    q3: Optional[float] = None
+    iqr: Optional[float] = None
+
+
+class WindowOutlier(BaseModel):
+    index: int
+    timestamp: datetime | float
+    temperature: float
+    consumption_kw: Optional[float] = None
+
+
+class PredictionDiagnostics(BaseModel):
+    schema_version: Literal[1]
+    recorded_at: datetime | float | None = None
+    reference_timestamp: datetime | float | None = None
+    temperature: Optional[WindowStatistics] = None
+    consumption_kw: Optional[WindowStatistics] = None
+    std_ddof: Literal[1]
+    factor_iqr: float
+    absolute_max_temp: float
+    umbral_alerta_minutos: float
+    sample_count: int
+    span_minutes: Optional[float] = None
+    std_temp: Optional[float] = None
+    iqr_temp: Optional[float] = None
+    outlier_count: int
+    outliers: list[WindowOutlier]
+    usable_sample_count: int
+    umbral_std_temp: float
+    condiciones: list[Literal["VENTANA_INSUFICIENTE", "DATOS_VARIABLES", "CON_ATIPICOS"]]
+
+
 class PredictionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -36,6 +76,7 @@ class PredictionRead(BaseModel):
     remaining_time_min: Optional[float] = None
     risk_level: str
     calculation_date: Optional[datetime] = None
+    diagnostico: Optional[PredictionDiagnostics] = None
 
 
 class SensorDataCreate(BaseModel):

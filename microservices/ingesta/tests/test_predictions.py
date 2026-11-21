@@ -1,24 +1,31 @@
 """Consultas y contrato de predicciones, sin PostgreSQL ni workers externos."""
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from models import Chamber, Prediction
+from database import get_db
 from routes.predictions import latest_prediction, prediction_history, router
 from schemas import PredictionRead
 
 
 class PredictionTests(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine('sqlite://')
+        self.engine = create_engine(
+            'sqlite://', poolclass=StaticPool, connect_args={"check_same_thread": False},
+        )
         Chamber.__table__.create(self.engine)
         Prediction.__table__.create(self.engine)
         self.db = Session(self.engine)
@@ -74,6 +81,46 @@ class PredictionTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as error:
                 call()
             self.assertEqual(error.exception.detail, 'Cámara no encontrada')
+
+    def test_http_diagnostico_calculado_por_predictor_y_predicciones_anteriores(self):
+        # Proceso aislado: ambos microservicios tienen módulos llamados models.
+        worker_dir = Path(__file__).resolve().parents[2] / "worker-predictivo"
+        calculo = subprocess.run(
+            [sys.executable, "-c", """
+import json
+from datetime import datetime, timedelta, timezone
+from predictor import evaluar_riesgo
+inicio = datetime(2026, 11, 20, tzinfo=timezone.utc)
+ventana = [
+    {"timestamp": inicio + timedelta(minutes=i),
+     "temperature": t, "consumption_kw": 2}
+    for i, t in enumerate([-18, -18, -18, -18, 20])
+]
+resultado = evaluar_riesgo(ventana, absolute_max_temp=-10)
+print(json.dumps(resultado["diagnostico"], default=lambda value: value.isoformat()))
+"""],
+            cwd=worker_dir, capture_output=True, text=True, check=True, timeout=30,
+        )
+        diagnostico = json.loads(calculo.stdout)
+        row = latest_prediction(self.a, self.db)
+        row.diagnostico = diagnostico
+        self.db.commit()
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        app.dependency_overrides[get_db] = lambda: self.db
+        with TestClient(app) as client:
+            response = client.get("/api/v1/predictions/latest", params={"id_chamber": str(self.a)})
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            self.assertEqual(body["slope"], 0.1234)
+            self.assertEqual(body["diagnostico"]["sample_count"], 5)
+            self.assertEqual(body["diagnostico"]["outlier_count"], 1)
+            self.assertEqual(body["diagnostico"]["outliers"][0]["temperature"], 20)
+            self.assertEqual(body["diagnostico"]["consumption_kw"]["media"], 2)
+            self.assertEqual(body["diagnostico"]["temperature"]["media"], -10.4)
+            history = client.get("/api/v1/predictions/history", params={"id_chamber": str(self.a)}).json()
+            self.assertEqual(history[0]["diagnostico"]["schema_version"], 1)
+            self.assertIsNone(history[1]["diagnostico"])
 
     def test_openapi_routes_and_query_validation(self):
         app = FastAPI()

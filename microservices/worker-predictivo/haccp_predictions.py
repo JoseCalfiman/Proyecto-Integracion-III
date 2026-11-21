@@ -1,4 +1,6 @@
 import logging
+import json
+from datetime import datetime
 from typing import Optional
 from sqlalchemy import MetaData, Table, select
 from db import engine
@@ -51,7 +53,7 @@ def obtener_regla_haccp_activa(session, chamber_id) -> Optional[dict]:
 
 def guardar_prediccion(session, chamber_id, calculated_slope: Optional[float], projected_temperature: Optional[float],
     remaining_time_min: Optional[float],
-    risk_level: str, ) -> Prediction:
+    risk_level: str, diagnostico: Optional[dict] = None) -> Prediction:
     
     prediccion = Prediction(
         id_chamber=chamber_id,
@@ -59,6 +61,11 @@ def guardar_prediccion(session, chamber_id, calculated_slope: Optional[float], p
         projected_temperature=projected_temperature,
         remaining_time_min=remaining_time_min,
         risk_level=risk_level,
+        diagnostico=json.loads(json.dumps(
+            diagnostico,
+            default=lambda value: value.isoformat() if isinstance(value, datetime) else value,
+            allow_nan=False,
+        )),
     )
     session.add(prediccion)
     session.commit()

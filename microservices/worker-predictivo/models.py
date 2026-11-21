@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Numeric, DateTime
+from sqlalchemy import Column, BigInteger, String, Numeric, DateTime, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
@@ -16,6 +16,7 @@ class Prediction(Base):
     risk_level = Column(String(20), nullable=False)
     calculation_date = Column(DateTime(timezone=True), default=datetime.utcnow)
     id_worker = Column(String(50))
+    diagnostico = Column(JSON, nullable=True)
 
 
 # Alias para compatibilidad con haccp_predictions.py
