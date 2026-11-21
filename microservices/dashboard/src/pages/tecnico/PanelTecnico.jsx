@@ -1,435 +1,534 @@
 import React, { useState } from 'react';
+
 import {
-  Wrench, RefreshCw, Server, CheckCircle2, XCircle, AlertTriangle,
-  Wifi, WifiOff, Thermometer, Droplet, DoorOpen,
-  Bell, HelpCircle, Download, User, MoreVertical,
-  Eye,
+
+  Activity, AlertTriangle, Bell, RefreshCw, Server, Thermometer,
+
 } from 'lucide-react';
+
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+
+  CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+
 } from 'recharts';
+
 import { useFetch } from '../../hooks/useApi';
+
 import EstadoSistema from '../../components/shared/EstadoSistema';
+
 import {
-  getGateways, getAlertasSistema, getTraficoRed,
-  getSensores, verificarSalud,
+
+  getCamarasTecnico, getAlertasSistema, getTemperaturasTecnico, getSensores,
+
 } from '../../api/panelTecnico';
 
-// ============================================================
-// DATOS MOCK (fallback mientras Diego no tenga los endpoints)
-// ============================================================
-const MOCK_GATEWAYS = [
-  { id: 'GTW-NORTE-01', nombre: 'Cámara Principal 01', estado: 'online', ping_ms: 12 },
-  { id: 'SN-902', nombre: 'Cámara Congelación', estado: 'offline', ultima_conexion: 'Hace 42m' },
-  { id: 'GTW-SUR-03', nombre: 'Túnel de Enfriamiento', estado: 'online', ping_ms: 18 },
-];
+import {
+  prepararCamaras, prepararAlertas, prepararTemperaturas, prepararSensores,
+} from '../../utils/panelTecnicoReal';
+import DiagnosticoCamara from './DiagnosticoCamara';
 
-const MOCK_ALERTAS = [
-  { id: 1, tipo: 'critica', codigo: 'CRITICAL', mensaje: 'Gateway SN-902 offline. Fallo de heartbeat.', fecha: '10:42 AM' },
-  { id: 2, tipo: 'advertencia', codigo: 'WARNING', mensaje: 'Sensor SN-102 (Cámara 4) calibración vencida hace 3 días.', fecha: '09:15 AM' },
-  { id: 3, tipo: 'info', codigo: 'INFO', mensaje: 'Backup de base de datos completado exitosamente (1.2GB).', fecha: '03:00 AM' },
-  { id: 4, tipo: 'advertencia', codigo: 'WARNING', mensaje: 'Latencia alta detectada en nodo Edge-02 (>500ms).', fecha: '7:45 PM' },
-];
 
-const MOCK_TRAFICO = [
-  { hora: '-6h', rx: 120, tx: 80 },
-  { hora: '-5h', rx: 180, tx: 120 },
-  { hora: '-4h', rx: 240, tx: 160 },
-  { hora: '-3h', rx: 200, tx: 140 },
-  { hora: '-2h', rx: 280, tx: 190 },
-  { hora: '-1h', rx: 260, tx: 170 },
-  { hora: 'Ahora', rx: 240, tx: 150 },
-];
 
-const MOCK_SENSORES = [
-  { id: 'SN-101', ubicacion: 'Cámara Principal A', tipo: 'Temp/Hum', bateria: 98, ultima_lectura: 'Hace 2s', estado: 'ok' },
-  { id: 'SN-102', ubicacion: 'Cámara 4 (Congelados)', tipo: 'Temp PT100', bateria: 74, ultima_lectura: 'Hace 1m', estado: 'calibracion' },
-  { id: 'SN-103', ubicacion: 'Pre-Cámara Sur', tipo: 'Apertura Puerta', bateria: 32, ultima_lectura: 'Hace 14d', estado: 'ok' },
-];
+// Sprint 3 · A3 — Ningún dato visible de este panel se obtiene de MOCK_*.
 
-// ============================================================
-// CONFIGURACIÓN DE COLORES
-// ============================================================
-const gatewayConfig = {
-  online: { color: 'green', icon: Wifi, label: 'Online' },
-  offline: { color: 'red', icon: WifiOff, label: 'Offline' },
+// IMPORTANTE: cámara habilitada != gateway conectado; temperatura != tráfico RX/TX.
+
+const nivel = {
+
+  critical: 'bg-red-50 border-red-200 text-red-700',
+
+  high: 'bg-red-50 border-red-200 text-red-700',
+
+  medium: 'bg-amber-50 border-amber-200 text-amber-800',
+
+  low: 'bg-blue-50 border-blue-200 text-blue-700',
+
 };
 
-const alertaConfig = {
-  critica: { color: 'red', bg: 'bg-red-50', border: 'border-red-200' },
-  advertencia: { color: 'yellow', bg: 'bg-yellow-50', border: 'border-yellow-200' },
-  info: { color: 'blue', bg: 'bg-blue-50', border: 'border-blue-200' },
+
+
+const fechaLocal = (valor) => {
+
+  if (!valor || Number.isNaN(Date.parse(valor))) return 'Fecha no disponible';
+
+  return new Date(valor).toLocaleString('es-CL');
+
 };
 
-const sensorIcono = {
-  'Temp/Hum': Thermometer,
-  'Temp PT100': Thermometer,
-  'Apertura Puerta': DoorOpen,
+
+
+// No confundir un error HTTP con una lista vacía legítima.
+
+const EstadoConsulta = ({ loading, error, empty, emptyMessage, children }) => {
+
+  if (loading) return <p className="text-sm text-gray-500" role="status">Consultando datos reales…</p>;
+
+  if (error) return (
+
+    <div role="alert" className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+
+      <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+
+      <p>No se pudieron obtener datos de esta sección: {error}</p>
+
+    </div>
+
+  );
+
+  if (empty) return <p className="text-sm text-gray-500">{emptyMessage}</p>;
+
+  return children;
+
 };
 
-// ============================================================
-// COMPONENTE
-// ============================================================
+
+
 const PanelTecnico = () => {
-  const [verificando, setVerificando] = useState(false);
 
-  // ==========================================================
-  // CARGAR DATOS DESDE LA API
-  // ==========================================================
-  const { data: gateways } = useFetch(getGateways, [], MOCK_GATEWAYS);
-  const { data: alertas } = useFetch(getAlertasSistema, [], MOCK_ALERTAS);
-  const { data: trafico } = useFetch(getTraficoRed, [], MOCK_TRAFICO);
-  const { data: sensores, reload: reloadSensores } = useFetch(getSensores, [], MOCK_SENSORES);
+  const [actualizando, setActualizando] = useState(false);
+  const [vistaActiva, setVistaActiva] = useState('general');
 
-  const listaGateways = Array.isArray(gateways) ? gateways : [];
-  const listaAlertas = Array.isArray(alertas) ? alertas : [];
-  const listaSensores = Array.isArray(sensores) ? sensores : [];
-  const datosTrafico = Array.isArray(trafico) && trafico.length > 0 ? trafico : MOCK_TRAFICO;
 
-  // ==========================================================
-  // VERIFICAR SALUD
-  // ==========================================================
-  const verificarSaludSistema = async () => {
-    setVerificando(true);
+
+// useFetch no recibe fallbackData. En error NO mostramos datos ficticios.
+
+  const camarasConsulta = useFetch(getCamarasTecnico, []);
+
+  const alertasConsulta = useFetch(getAlertasSistema, []);
+
+  const temperaturaConsulta = useFetch(getTemperaturasTecnico, []);
+
+  const sensoresConsulta = useFetch(getSensores, []);
+
+
+
+  const camaras = prepararCamaras(Array.isArray(camarasConsulta.data) ? camarasConsulta.data : []);
+
+  const alertas = prepararAlertas(Array.isArray(alertasConsulta.data) ? alertasConsulta.data : []);
+
+  const temperaturas = prepararTemperaturas(Array.isArray(temperaturaConsulta.data) ? temperaturaConsulta.data : []);
+
+  const sensores = prepararSensores(Array.isArray(sensoresConsulta.data) ? sensoresConsulta.data : []);
+
+
+
+  const actualizar = async () => {
+
+    setActualizando(true);
+
     try {
-      await verificarSalud();
-      reloadSensores();
-    } catch (err) {
-      alert('No se pudo verificar la salud del sistema.');
+
+      await Promise.allSettled([
+
+        camarasConsulta.reload(), alertasConsulta.reload(),
+
+        temperaturaConsulta.reload(), sensoresConsulta.reload(),
+
+      ]);
+
     } finally {
-      setVerificando(false);
+
+      setActualizando(false);
+
     }
+
   };
 
+
+
   return (
-    <div>
-      {/* ==================================================== */}
-      {/* HEADER SUPERIOR */}
-      {/* ==================================================== */}
-      <div className="flex items-center justify-end gap-3 mb-6">
-        <button className="relative p-2 rounded-full hover:bg-gray-100">
-          <Bell size={20} className="text-gray-600" />
-          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-        </button>
-        <button className="p-2 rounded-full hover:bg-gray-100">
-          <HelpCircle size={20} className="text-gray-600" />
-        </button>
-        <button className="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-600">
-          <Download size={16} />
-          Descargar Reporte
-        </button>
-        <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center">
-          <User size={18} className="text-gray-600" />
-        </div>
-      </div>
 
-      {/* ==================================================== */}
-      {/* TÍTULO */}
-      {/* ==================================================== */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">Panel de Control Técnico</h1>
-        <p className="text-sm text-gray-500">Monitoreo de infraestructura y salud del sistema</p>
-      </div>
+    <div className="space-y-6">
 
-      {/* ESTADO DEL SISTEMA (System Controller) */}
-      <EstadoSistema />
+      <div className="flex flex-wrap items-start justify-between gap-3">
 
-      {/* ==================================================== */}
-      {/* SECCIÓN 1: GATEWAYS + ALERTAS */}
-      {/* ==================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        {/* Gateways (2/3) */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow-md">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Server size={18} className="text-green-600" />
-              <h2 className="font-semibold text-gray-800">Estado de Gateways</h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-3 py-1 rounded-full">
-                <CheckCircle2 size={12} />
-                98.9% UPTIME
-              </span>
-              <button
-                onClick={verificarSaludSistema}
-                disabled={verificando}
-                className="p-1.5 rounded-lg hover:bg-gray-100"
-              >
-                <RefreshCw size={16} className={`text-gray-500 ${verificando ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-          </div>
+        <div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {listaGateways.map((g) => {
-              const config = gatewayConfig[g.estado] || gatewayConfig.offline;
-              const Icon = config.icon;
-              const borderColor = g.estado === 'online' ? 'border-green-200' : 'border-red-200';
+          <h1 className="text-2xl font-bold text-gray-800">Panel de Control Técnico</h1>
 
-              return (
-                <div key={g.id} className={`border ${borderColor} rounded-lg p-4`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono text-gray-500">{g.id}</span>
-                    <Icon
-                      size={16}
-                      className={g.estado === 'online' ? 'text-green-600' : 'text-red-600'}
-                    />
-                  </div>
-                  <p className="text-sm font-medium text-gray-700 mb-1">{g.nombre}</p>
-                  <p
-                    className={`text-lg font-bold ${
-                      g.estado === 'online' ? 'text-green-600' : 'text-red-600'
-                    }`}
-                  >
-                    {config.label}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {g.estado === 'online' ? `${g.ping_ms}ms ping` : g.ultima_conexion}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+          <p className="text-sm text-gray-500">
 
-        {/* Alertas del sistema (1/3) */}
-        <div className="lg:col-span-1 bg-white p-6 rounded-lg shadow-md">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Bell size={18} className="text-yellow-600" />
-              <h2 className="font-semibold text-gray-800">Alertas del Sistema</h2>
-            </div>
-            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-              {listaAlertas.length} Nuevas
-            </span>
-          </div>
+            Datos reales consultados desde FastAPI y TimescaleDB · sin simulaciones de respaldo
 
-          <div className="space-y-3">
-            {listaAlertas.map((a) => {
-              const config = alertaConfig[a.tipo] || alertaConfig.info;
-              return (
-                <div
-                  key={a.id}
-                  className={`${config.bg} border ${config.border} rounded-lg p-3`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span
-                      className={`text-xs font-bold ${
-                        a.tipo === 'critica'
-                          ? 'text-red-600'
-                          : a.tipo === 'advertencia'
-                          ? 'text-yellow-700'
-                          : 'text-blue-700'
-                      }`}
-                    >
-                      {a.codigo}
-                    </span>
-                    <span className="text-xs text-gray-500">{a.fecha}</span>
-                  </div>
-                  <p className="text-xs text-gray-700">{a.mensaje}</p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* ==================================================== */}
-      {/* SECCIÓN 2: TRÁFICO DE RED + MENÚ DE CALIBRACIÓN */}
-      {/* ==================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        {/* Tráfico de red (2/3) */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow-md">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-800">Tráfico de Red (Últimas 6H)</h2>
-            <div className="flex items-center gap-3 text-xs">
-              <div className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                <span className="text-gray-600">RX</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                <span className="text-gray-600">TX</span>
-              </div>
-            </div>
-          </div>
-
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={datosTrafico}>
-              <defs>
-                <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="hora" stroke="#9ca3af" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="rx"
-                stroke="#10b981"
-                fill="url(#colorRx)"
-                strokeWidth={2}
-              />
-              <Area
-                type="monotone"
-                dataKey="tx"
-                stroke="#3b82f6"
-                fill="url(#colorTx)"
-                strokeWidth={2}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Menú de calibración (1/3) */}
-        <div className="lg:col-span-1 bg-white p-6 rounded-lg shadow-md">
-          <div className="flex items-center gap-2 mb-4">
-            <Wrench size={18} className="text-green-600" />
-            <h2 className="font-semibold text-gray-800">Menú de Calibración</h2>
-          </div>
-
-          <div className="space-y-3">
-            <button className="w-full flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 text-left">
-              <Thermometer size={20} className="text-green-600" />
-              <div>
-                <p className="text-sm font-medium text-gray-800">Sensores de Temp.</p>
-                <p className="text-xs text-gray-500">Calibración de punto cero</p>
-              </div>
-            </button>
-
-            <button className="w-full flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 text-left">
-              <Droplet size={20} className="text-blue-600" />
-              <div>
-                <p className="text-sm font-medium text-gray-800">Sensores de Humedad</p>
-                <p className="text-xs text-gray-500">Ajuste de histéresis</p>
-              </div>
-            </button>
-
-            <button className="w-full flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 text-left">
-              <Server size={20} className="text-gray-600" />
-              <div>
-                <p className="text-sm font-medium text-gray-800">Microcontroladores</p>
-                <p className="text-xs text-gray-500">Revisión y diagnóstico</p>
-              </div>
-            </button>
-          </div>
-
-          <p className="text-xs text-gray-400 mt-4">
-            Inicie rutinas de mantenimiento preventivo
           </p>
-        </div>
-      </div>
 
-      {/* ==================================================== */}
-      {/* SECCIÓN 3: INVENTARIO DE SENSORES */}
-      {/* ==================================================== */}
-      <div className="bg-white rounded-lg shadow-md overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <Thermometer size={18} className="text-green-600" />
-            <h2 className="font-semibold text-gray-800">Inventario de Sensores</h2>
-          </div>
-          <button className="text-xs text-green-600 hover:text-green-700 font-medium">
-            Ver Todos
+        </div>
+
+        {vistaActiva === 'general' && (
+        <button
+  
+            type="button"
+  
+            onClick={actualizar}
+  
+            disabled={actualizando}
+  
+            className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+  
+          >
+  
+            <RefreshCw size={16} className={actualizando ? 'animate-spin' : ''} />
+  
+            {actualizando ? 'Actualizando…' : 'Actualizar datos'}
+  
           </button>
+      )}
+
+      </div>
+
+
+
+      <div
+        className="flex flex-wrap gap-2 border-b border-gray-200"
+        role="tablist"
+        aria-label="Secciones del panel técnico"
+      >
+        <button
+          type="button"
+          role="tab"
+          id="tab-tecnico-general"
+          aria-selected={vistaActiva === 'general'}
+          aria-controls="panel-tecnico-general"
+          tabIndex={vistaActiva === 'general' ? 0 : -1}
+          onClick={() => setVistaActiva('general')}
+          className={`inline-flex items-center gap-2 rounded-t-lg border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+            vistaActiva === 'general'
+              ? 'border-green-600 bg-green-50 text-green-700'
+              : 'border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+          }`}
+        >
+          <Server size={16} />
+          Vista general
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="tab-tecnico-diagnostico"
+          aria-selected={vistaActiva === 'diagnostico'}
+          aria-controls="panel-tecnico-diagnostico"
+          tabIndex={vistaActiva === 'diagnostico' ? 0 : -1}
+          onClick={() => setVistaActiva('diagnostico')}
+          className={`inline-flex items-center gap-2 rounded-t-lg border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+            vistaActiva === 'diagnostico'
+              ? 'border-blue-600 bg-blue-50 text-blue-700'
+              : 'border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+          }`}
+        >
+          <Activity size={16} />
+          Diagnóstico por cámara
+        </button>
+      </div>
+
+      {vistaActiva === 'general' ? (
+        <div id="panel-tecnico-general" role="tabpanel" aria-labelledby="tab-tecnico-general" className="space-y-6">
+          {/* Estado del System Controller: se conserva el componente original. */}
+          <EstadoSistema />
+
+
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+
+        <section className="rounded-lg bg-white p-6 shadow-md lg:col-span-2" aria-label="Cámaras registradas">
+
+          <div className="mb-3 flex items-center gap-2">
+
+            <Server size={19} className="text-green-600" />
+
+            <h2 className="font-semibold text-gray-800">Cámaras registradas</h2>
+
+            {!camarasConsulta.error && !camarasConsulta.loading && (
+
+              <span className="ml-auto text-xs text-gray-500">{camaras.length} en la respuesta</span>
+
+            )}
+
+          </div>
+
+          <p className="mb-4 text-xs text-gray-500">
+
+            Fuente: GET /api/v1/chambers. «Habilitada» es un estado de registro,
+
+            no demuestra conexión MQTT, ping ni uptime del gateway.
+
+          </p>
+
+          <EstadoConsulta
+
+            loading={camarasConsulta.loading}
+
+            error={camarasConsulta.error}
+
+            empty={!camaras.length}
+
+            emptyMessage="No hay cámaras en el listado devuelto por el backend."
+
+          >
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+
+              {camaras.map((c) => (
+
+                <article key={c.id} className="min-w-0 rounded-lg border border-gray-200 p-4">
+
+                  <p className="break-all font-mono text-xs text-gray-400">{c.id}</p>
+
+                  <p className="mt-1 font-medium text-gray-800">{c.nombre}</p>
+
+                  <p className="text-xs text-gray-500">{c.ubicacion || 'Ubicación no registrada'}</p>
+
+                  <span className={`mt-2 inline-block rounded-full px-2 py-1 text-xs ${
+
+                    c.habilitada === true ? 'bg-green-50 text-green-700'
+
+                      : c.habilitada === false ? 'bg-gray-100 text-gray-700'
+
+                        : 'bg-amber-50 text-amber-800'
+
+                  }`}>
+
+                    {c.habilitada === true ? 'Habilitada' : c.habilitada === false ? 'Deshabilitada' : 'Estado no informado'}
+
+                  </span>
+
+                </article>
+
+              ))}
+
+            </div>
+
+          </EstadoConsulta>
+
+        </section>
+
+
+
+        <section className="rounded-lg bg-white p-6 shadow-md" aria-label="Alertas recientes">
+
+          <div className="mb-3 flex items-center gap-2">
+
+            <Bell size={19} className="text-amber-600" />
+
+            <h2 className="font-semibold text-gray-800">Alertas recientes</h2>
+
+          </div>
+
+          <p className="mb-4 text-xs text-gray-500">
+
+            Fuente: GET /api/v1/alerts?limit=20. Incluye todos los estados;
+
+            no representa el total histórico ni «alertas nuevas».
+
+          </p>
+
+          <EstadoConsulta
+
+            loading={alertasConsulta.loading}
+
+            error={alertasConsulta.error}
+
+            empty={!alertas.length}
+
+            emptyMessage="La API no devolvió alertas en la consulta actual."
+
+          >
+
+            <div className="max-h-96 space-y-3 overflow-y-auto">
+
+              {alertas.map((a) => (
+
+                <article key={a.id} className={`rounded-lg border p-3 ${nivel[a.severidad] || 'bg-gray-50 border-gray-200 text-gray-800'}`}>
+
+                  <div className="flex flex-wrap justify-between gap-2 text-xs font-semibold">
+
+                    <span>{a.severidad || 'Severidad no informada'}</span>
+
+                    <span>{a.estado || 'Estado no informado'}</span>
+
+                  </div>
+
+                  <p className="mt-2 text-sm">{a.mensaje}</p>
+
+                  <p className="mt-1 break-all text-xs opacity-75">Cámara: {a.camara || 'No informada'}</p>
+
+                  <p className="mt-1 text-xs opacity-75">{fechaLocal(a.fecha)}</p>
+
+                </article>
+
+              ))}
+
+            </div>
+
+          </EstadoConsulta>
+
+        </section>
+
+      </div>
+
+
+
+      <section className="rounded-lg bg-white p-6 shadow-md" aria-label="Temperatura de las últimas seis horas">
+
+        <div className="mb-2 flex items-center gap-2">
+
+          <Activity size={19} className="text-green-600" />
+
+          <h2 className="font-semibold text-gray-800">Temperatura de la planta · últimas 6 horas</h2>
+
         </div>
 
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50">
-            <tr className="text-left text-gray-500 uppercase text-xs">
-              <th className="px-6 py-3 font-medium">ID Sensor</th>
-              <th className="px-6 py-3 font-medium">Ubicación</th>
-              <th className="px-6 py-3 font-medium">Tipo</th>
-              <th className="px-6 py-3 font-medium">Batería</th>
-              <th className="px-6 py-3 font-medium">Última Lectura</th>
-              <th className="px-6 py-3 font-medium">Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            {listaSensores.map((s) => {
-              const IconSensor = sensorIcono[s.tipo] || Thermometer;
-              const bateriaColor =
-                s.bateria > 70 ? 'bg-green-500' : s.bateria > 40 ? 'bg-yellow-500' : 'bg-red-500';
+        <p className="mb-4 text-xs text-gray-500">
 
-              return (
-                <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-6 py-3">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`w-2 h-2 rounded-full ${
-                          s.estado === 'ok' ? 'bg-green-500' : 'bg-yellow-500'
-                        }`}
-                      ></span>
-                      <span className="font-mono text-xs text-gray-700">{s.id}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-3 text-gray-700">
-                    <div className="flex items-center gap-2">
-                      <IconSensor size={14} className="text-gray-400" />
-                      {s.ubicacion}
-                    </div>
-                  </td>
-                  <td className="px-6 py-3">
-                    <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
-                      {s.tipo}
-                    </span>
-                  </td>
-                  <td className="px-6 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 bg-gray-200 rounded-full h-1.5">
-                        <div
-                          className={`h-1.5 rounded-full ${bateriaColor}`}
-                          style={{ width: `${s.bateria}%` }}
-                        ></div>
-                      </div>
-                      <span className="text-xs text-gray-600">{s.bateria}%</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-3 text-xs">
-                    {s.estado === 'calibracion' ? (
-                      <span className="text-yellow-600 font-medium">
-                        ⚠ Calibración requerida
-                      </span>
-                    ) : (
-                      <span className="text-gray-500">{s.ultima_lectura}</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-3">
-                    <div className="flex gap-2">
-                      <button
-                        className="p-1.5 rounded-lg hover:bg-gray-100"
-                        title="Ver detalle"
-                      >
-                        <Eye size={14} className="text-gray-500" />
-                      </button>
-                      <button
-                        className="p-1.5 rounded-lg hover:bg-gray-100"
-                        title="Más opciones"
-                      >
-                        <MoreVertical size={14} className="text-gray-500" />
-                      </button>
-                    </div>
-                  </td>
+          Fuente: GET /api/v1/dashboard/temperature?minutes=360. Media simple de las
+
+          temperaturas promedio por cámara en cada intervalo (°C). No son bytes RX/TX ni tráfico de red.
+
+        </p>
+
+        <EstadoConsulta
+
+          loading={temperaturaConsulta.loading}
+
+          error={temperaturaConsulta.error}
+
+          empty={!temperaturas.length}
+
+          emptyMessage="No hay lecturas de temperatura en las últimas seis horas."
+
+        >
+
+          <div style={{ width: '100%', height: 240 }}>
+
+            <ResponsiveContainer width="100%" height="100%">
+
+              <LineChart data={temperaturas} margin={{ top: 5, right: 16, left: 2, bottom: 5 }}>
+
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+
+                <XAxis dataKey="hora" stroke="#6b7280" tick={{ fontSize: 11 }} minTickGap={24} />
+
+                <YAxis stroke="#6b7280" tick={{ fontSize: 11 }} unit=" °C" width={62} domain={['auto', 'auto']} />
+
+                <Tooltip
+
+                  formatter={(v, nombre) => [Number(v).toLocaleString('es-CL', { maximumFractionDigits: 2 }) + ' °C', nombre]}
+
+                  labelFormatter={(_, payload) => payload?.[0]?.payload?.timestamp
+
+                    ? fechaLocal(payload[0].payload.timestamp) : ''}
+
+                />
+
+                <Line type="monotone" dataKey="temperatura" name="Temperatura media" stroke="#059669" strokeWidth={2} dot={false} connectNulls={false} />
+
+              </LineChart>
+
+            </ResponsiveContainer>
+
+          </div>
+
+          <p className="mt-2 text-xs text-gray-500">
+
+            Se grafican {temperaturas.length} intervalos con lecturas. Los intervalos sin datos no se inventan.
+
+          </p>
+
+        </EstadoConsulta>
+
+      </section>
+
+
+
+      <section className="rounded-lg bg-white p-6 shadow-md" aria-label="Inventario de sensores">
+
+        <div className="mb-2 flex items-center gap-2">
+
+          <Thermometer size={19} className="text-green-600" />
+
+          <h2 className="font-semibold text-gray-800">Inventario de sensores</h2>
+
+        </div>
+
+        <p className="mb-4 text-xs text-gray-500">
+
+          Fuente prevista: GET /api/v1/panel/sensores (tarea D6 de Diego).
+
+          Si esta ruta no está publicada, se informa el problema en vez de mostrar SN-101, baterías o calibraciones ficticias.
+
+        </p>
+
+        <EstadoConsulta
+
+          loading={sensoresConsulta.loading}
+
+          error={sensoresConsulta.error}
+
+          empty={!sensores.length}
+
+          emptyMessage="No se encontraron sensores registrados. No se presupone ningún sensor conectado."
+
+        >
+
+          <div className="overflow-x-auto">
+
+            <table className="w-full text-left text-sm">
+
+              <thead>
+
+                <tr className="border-b text-xs uppercase text-gray-500">
+
+                  <th className="py-3 pr-4">Sensor</th>
+
+                  <th className="py-3 pr-4">Ubicación</th>
+
+                  <th className="py-3 pr-4">Tipo</th>
+
+                  <th className="py-3 pr-4">Batería</th>
+
+                  <th className="py-3 pr-4">Última lectura</th>
+
+                  <th className="py-3">Estado</th>
+
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+
+              </thead>
+
+              <tbody>
+
+                {sensores.map((s, i) => (
+
+                  <tr key={s.id ?? i} className="border-b border-gray-100 text-gray-700">
+
+                    <td className="py-3 pr-4 font-mono text-xs">{s.id ?? '—'}</td>
+
+                    <td className="py-3 pr-4">{s.ubicacion ?? '—'}</td>
+
+                    <td className="py-3 pr-4">{s.tipo ?? '—'}</td>
+
+                    <td className="py-3 pr-4">{s.bateria === null ? 'No reportada' : `${s.bateria}%`}</td>
+
+                    <td className="py-3 pr-4">{s.ultimaLectura ?? 'No reportada'}</td>
+
+                    <td className="py-3">{s.estado ?? 'No informado'}</td>
+
+                  </tr>
+
+                ))}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        </EstadoConsulta>
+
+      </section>
+        </div>
+      ) : (
+        <div id="panel-tecnico-diagnostico" role="tabpanel" aria-labelledby="tab-tecnico-diagnostico">
+          <DiagnosticoCamara camaras={camaras} />
+        </div>
+      )}
     </div>
   );
 };

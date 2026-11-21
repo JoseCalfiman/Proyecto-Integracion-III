@@ -54,22 +54,13 @@ def _current_consumption_kw(db: Session) -> float:
 
 
 def _estimated_savings_clp(db: Session) -> float:
-    """Ahorro de la tanda más reciente de recomendaciones pendientes (evita sumar tandas antiguas)."""
-    latest = (
-        db.query(func.max(SavingRecommendation.created_at))
+    """Suma del ahorro estimado de todas las recomendaciones pendientes."""
+    total = (
+        db.query(func.sum(SavingRecommendation.expected_saving_amount))
         .filter(SavingRecommendation.status == "pending")
         .scalar()
     )
-    if latest is None:
-        return 0.0
-    total = (
-        db.query(func.sum(SavingRecommendation.expected_saving_amount))
-        .filter(
-            SavingRecommendation.status == "pending",
-            SavingRecommendation.created_at == latest,
-        )
-        .scalar()
-    )
+
     return float(total or 0)
 
 
