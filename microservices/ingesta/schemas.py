@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import Optional, Literal
 from uuid import UUID
 
-from pydantic import AliasChoices, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import SecretStr, AliasChoices, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 
@@ -74,6 +74,24 @@ class HistoricalMeasurement(BaseModel):
     consumption_kw: Optional[float] = None
 
 
+class DescriptiveStats(BaseModel):
+    n: int
+    media: Optional[float] = None
+    mediana: Optional[float] = None
+    minimo: Optional[float] = None
+    maximo: Optional[float] = None
+    desviacion_estandar: Optional[float] = None
+    q1: Optional[float] = None
+    q3: Optional[float] = None
+    iqr: Optional[float] = None
+
+
+class ChamberStats(BaseModel):
+    id_chamber: UUID
+    temperature: DescriptiveStats
+    consumption_kw: DescriptiveStats
+
+
 class SensorDataRead(SensorDataCreate):
     """Lectura tal como se devuelve desde la base de datos."""
 
@@ -106,7 +124,6 @@ class ChamberRead(BaseModel):
     created_at: Optional[datetime] = None
 
 class AlertAction(BaseModel):
-    id_user: UUID  # temporal: saldrá del JWT cuando exista auth
     note: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -148,7 +165,6 @@ class HaccpRuleUpdate(BaseModel):
     tolerance_time_min: int = Field(ge=1, le=1440)
     severity: HaccpSeverity = "medium"
     active: bool = True
-    id_user_modified: Optional[UUID] = None  # temporal: saldrá del JWT
 
     @model_validator(mode="after")
     def check_range(self):
@@ -254,3 +270,70 @@ class GeminiChatResponse(BaseModel):
     mediciones_consideradas: int
 
     alertas_consideradas: int
+
+class LoginRequest(BaseModel):
+    email: str = Field(max_length=150)
+    password: SecretStr
+
+
+class ChamberSummary(ChamberStats):
+    name: Optional[str] = None
+    consumption_total_kw: Optional[float] = None
+    alerts: int
+    critical_alerts: int
+    pending_recommendations: int
+
+
+class StatsRankingEntry(BaseModel):
+    id_chamber: UUID
+    name: Optional[str] = None
+    value: float
+
+
+class StatsRankings(BaseModel):
+    top_alerts: list[StatsRankingEntry]
+    top_consumption: list[StatsRankingEntry]
+
+
+class StatsSummary(BaseModel):
+    chambers: list[ChamberSummary]
+    rankings: StatsRankings
+
+
+class PanelGateway(BaseModel):
+    id: UUID
+    nombre: Optional[str] = None
+    active: Optional[bool] = None
+    estado: Literal["unknown"] = "unknown"
+    ping_ms: None = None
+    ultima_conexion: Optional[datetime] = None
+    sensores: int
+
+
+class PanelSensor(BaseModel):
+    id: int
+    id_chamber: Optional[UUID] = None
+    ubicacion: Optional[str] = None
+    tipo: Optional[str] = None
+    modelo: Optional[str] = None
+    mqtt_identifier: Optional[str] = None
+    estado: Optional[str] = None
+    bateria: None = None
+    ultima_lectura: Optional[datetime] = None
+
+
+class PanelAlert(BaseModel):
+    id: int
+    id_chamber: Optional[UUID] = None
+    tipo: Literal["critica", "advertencia", "info"]
+    codigo: str
+    mensaje: Optional[str] = None
+    fecha: Optional[datetime] = None
+    estado: str
+    alert_type: Optional[str] = None
+
+
+class PanelHealth(BaseModel):
+    status: Literal["ok", "degraded"]
+    checked_at: datetime
+    checks: dict[str, Literal["ok", "error"]]
