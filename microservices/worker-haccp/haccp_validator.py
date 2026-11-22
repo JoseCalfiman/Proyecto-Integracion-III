@@ -19,10 +19,17 @@ DEFAULT_HACCP_RULE = {
     "critical_temp_c": 6.0,
     "sample_interval_seconds": 10,
 }
+ALLOWED_HACCP_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 
 
 class HaccpRuleConfigurationError(ValueError):
     """An active HACCP rule contains missing or incompatible values."""
+
+
+def _format_message_number(value: float) -> str:
+    """Format message values with at most three decimals and no trailing zeros."""
+    formatted = f"{value:.3f}".rstrip("0").rstrip(".")
+    return "0" if formatted in {"", "-0"} else formatted
 
 
 def _normalize_rule(rule: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -136,16 +143,35 @@ def evaluate_predictive_event(
             )
         return number
 
+    def rule_value(field: str) -> Any:
+        if isinstance(rule, Mapping):
+            return rule.get(field)
+        return getattr(rule, field, None)
+
+    if rule_value("active") is not True:
+        raise HaccpRuleConfigurationError(
+            "La regla HACCP debe estar activa para ser aplicada."
+        )
+
+    severity = rule_value("severity")
+    if not isinstance(severity, str) or severity not in ALLOWED_HACCP_SEVERITIES:
+        raise HaccpRuleConfigurationError(
+            "Severidad inválida en la regla HACCP; debe ser una de: "
+            + ", ".join(sorted(ALLOWED_HACCP_SEVERITIES))
+            + "."
+        )
+
     min_temp = rule_number("min_absolute_temp")
     max_temp = rule_number("max_absolute_temp")
     tolerance = rule_number("tolerance_time_min")
-    if min_temp > max_temp:
+    if min_temp >= max_temp:
         raise HaccpRuleConfigurationError(
-            "La regla HACCP tiene min_absolute_temp mayor que max_absolute_temp."
+            "La regla HACCP requiere min_absolute_temp menor que "
+            "max_absolute_temp."
         )
-    if tolerance < 0:
+    if tolerance <= 0:
         raise HaccpRuleConfigurationError(
-            "La regla HACCP tiene tolerance_time_min negativa."
+            "La regla HACCP requiere tolerance_time_min mayor que cero."
         )
 
     temperature = event_values["temperature"]
@@ -158,16 +184,42 @@ def evaluate_predictive_event(
     if remaining_time <= tolerance:
         violations.append("remaining_time_within_tolerance")
 
+    temperature_text = _format_message_number(temperature)
+    remaining_time_text = _format_message_number(remaining_time)
+    min_temp_text = _format_message_number(min_temp)
+    max_temp_text = _format_message_number(max_temp)
+    tolerance_text = _format_message_number(tolerance)
+
     if violations:
+        violation_details = []
+        if "temperature_below_minimum" in violations:
+            violation_details.append("temperatura bajo el mínimo")
+        if "temperature_above_maximum" in violations:
+            violation_details.append("temperatura sobre el máximo")
+        if "remaining_time_within_tolerance" in violations:
+            violation_details.append("tiempo restante dentro de la tolerancia")
+
         message = (
-            f"Alerta HACCP: temperatura {temperature}°C, tiempo restante "
-            f"{remaining_time} min; infracciones: {', '.join(violations)}."
+            f"Alerta HACCP | Temperatura: {temperature_text} °C "
+            f"(rango: [{min_temp_text}, {max_temp_text}] °C) | "
+            f"Tiempo restante: {remaining_time_text} min "
+            f"(tolerancia: {tolerance_text} min) | "
+            f"Causas: {', '.join(violation_details)}"
         )
+        context = []
+        if payload.get("risk_level") is not None:
+            context.append(f"Riesgo: {payload['risk_level']}")
+        if payload.get("id_prediction") is not None:
+            context.append(f"Predicción: {payload['id_prediction']}")
+        if context:
+            message += f" | {' | '.join(context)}"
+        message += "."
     else:
         message = (
-            f"Sin infracción HACCP: temperatura {temperature}°C dentro del "
-            f"rango [{min_temp}, {max_temp}]°C y tiempo restante "
-            f"{remaining_time} min sobre la tolerancia de {tolerance} min."
+            f"Sin infracción HACCP | Temperatura: {temperature_text} °C "
+            f"(rango: [{min_temp_text}, {max_temp_text}] °C) | "
+            f"Tiempo restante: {remaining_time_text} min "
+            f"(tolerancia: {tolerance_text} min)."
         )
 
     return {
@@ -313,6 +365,7 @@ def validar_haccp(payload: Mapping[str, Any], rule: Any) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_HACCP_RULE",
+    "ALLOWED_HACCP_SEVERITIES",
     "HaccpRuleConfigurationError",
     "evaluate_temperature_rule",
     "evaluate_temperature_series",

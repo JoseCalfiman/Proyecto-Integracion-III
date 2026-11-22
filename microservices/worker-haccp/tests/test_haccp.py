@@ -17,6 +17,8 @@ ACTIVE_RULE = {
     "min_absolute_temp": -20.0,
     "max_absolute_temp": 5.0,
     "tolerance_time_min": 15,
+    "severity": "medium",
+    "active": True,
 }
 
 
@@ -45,7 +47,12 @@ def test_predictive_event_decision_boundaries(payload, expected_violation):
 
 def test_predictive_event_combines_simultaneous_violations_once():
     result = evaluate_predictive_event(
-        {"temperature": 6, "remaining_time_min": 10},
+        {
+            "temperature": 6.123456,
+            "remaining_time_min": 10.987654,
+            "risk_level": "CRITICO",
+            "id_prediction": 23,
+        },
         ACTIVE_RULE,
     )
 
@@ -54,6 +61,55 @@ def test_predictive_event_combines_simultaneous_violations_once():
         "temperature_above_maximum",
         "remaining_time_within_tolerance",
     ]
+    assert "Temperatura: 6.123 °C (rango: [-20, 5] °C)" in result["message"]
+    assert "Tiempo restante: 10.988 min (tolerancia: 15 min)" in result["message"]
+    assert "Causas: temperatura sobre el máximo, tiempo restante dentro de la tolerancia" in result["message"]
+    assert "Riesgo: CRITICO" in result["message"]
+    assert "Predicción: 23" in result["message"]
+
+
+def test_predictive_event_message_describes_temperature_below_minimum():
+    result = evaluate_predictive_event(
+        {"temperature": -20.1, "remaining_time_min": 20},
+        ACTIVE_RULE,
+    )
+
+    assert result["is_alert"] is True
+    assert "Temperatura: -20.1 °C" in result["message"]
+    assert "Causas: temperatura bajo el mínimo" in result["message"]
+
+
+def test_predictive_event_message_describes_temperature_above_maximum():
+    result = evaluate_predictive_event(
+        {"temperature": 5.1, "remaining_time_min": 20},
+        ACTIVE_RULE,
+    )
+
+    assert result["is_alert"] is True
+    assert "Temperatura: 5.1 °C" in result["message"]
+    assert "Causas: temperatura sobre el máximo" in result["message"]
+
+
+def test_predictive_event_message_describes_time_within_tolerance():
+    result = evaluate_predictive_event(
+        {"temperature": 2, "remaining_time_min": 15},
+        ACTIVE_RULE,
+    )
+
+    assert result["is_alert"] is True
+    assert "Tiempo restante: 15 min (tolerancia: 15 min)" in result["message"]
+    assert "Causas: tiempo restante dentro de la tolerancia" in result["message"]
+
+
+def test_predictive_event_message_omits_unavailable_optional_context():
+    result = evaluate_predictive_event(
+        {"temperature": 6, "remaining_time_min": 20},
+        ACTIVE_RULE,
+    )
+
+    assert result["is_alert"] is True
+    assert "Nivel de riesgo:" not in result["message"]
+    assert "ID de predicción:" not in result["message"]
 
 
 @pytest.mark.parametrize(
@@ -67,9 +123,14 @@ def test_predictive_event_combines_simultaneous_violations_once():
         {"max_absolute_temp": float("inf")},
         {"tolerance_time_min": float("nan")},
         {"tolerance_time_min": -1},
+        {"tolerance_time_min": 0},
         {"min_absolute_temp": 6, "max_absolute_temp": 5},
+        {"min_absolute_temp": 5, "max_absolute_temp": 5},
         {"max_absolute_temp": "5"},
         {"tolerance_time_min": True},
+        {"severity": "urgent"},
+        {"active": False},
+        {"active": None},
     ],
 )
 def test_predictive_event_rejects_invalid_active_rule(rule_overrides):

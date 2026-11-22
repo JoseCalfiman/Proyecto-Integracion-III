@@ -40,6 +40,54 @@ cambio en x".
 
 Implementación: `predictor.calcular_pendiente()`.
 
+### Tratamiento de atípicos y diagnóstico de ventana (M3 y M4)
+
+`evaluar_riesgo()` identifica temperaturas fuera de
+`[Q1 - 1,5 × IQR, Q3 + 1,5 × IQR]`, con cuartiles interpolados linealmente.
+La regresión usa las lecturas aceptadas y sus timestamps originales, conservando
+las distancias temporales. La ventana original permanece disponible y las
+lecturas excluidas quedan en el log y en `diagnostico.outliers`, con índice,
+timestamp y temperatura.
+
+El tiempo restante se calcula desde la última lectura aceptada. Si el último
+dato es un spike, el tiempo estimado corresponde al instante de la última lectura
+aceptada. Un valor fuera de IQR es una marca estadística que requiere revisión.
+El control de límites absolutos de HACCP sigue siendo responsabilidad del worker HACCP.
+
+Por ejemplo, con muestras separadas por un minuto,
+`[-18, -18.1, -17.9, -18, 20]` pasa de una pendiente sin filtrar de
+`7,61 °C/min` a `0,02 °C/min`. La lectura de `20 °C` queda registrada.
+La tendencia `[-18, -17, -16]` conserva su pendiente de `1 °C/min`.
+`calcular_pendiente()` permite calcular la regresión directa para comparar.
+
+Cada evaluación devuelve `diagnostico` y el consumidor lo registra junto con
+el identificador de cámara. Sus métricas describen la ventana original:
+
+- `sample_count`: número de lecturas.
+- `span_minutes`: diferencia entre el mayor y el menor timestamp en minutos.
+  En una ventana vacía es `None`.
+- `std_temp`: desviación estándar muestral. Es `None` con menos de dos
+  muestras o temperaturas no finitas.
+- `iqr_temp`: Q3 menos Q1. Es `None` en una ventana vacía o con temperaturas
+  no finitas.
+- `outlier_count` y `outliers`: cantidad y detalle de lecturas marcadas por IQR.
+- `usable_sample_count`: cantidad de lecturas aceptadas para la regresión.
+- `umbral_std_temp`: umbral usado para indicar variabilidad, en °C.
+- `condiciones`: lista de condiciones que pueden coexistir.
+
+Las condiciones son `VENTANA_INSUFICIENTE` cuando hay menos de dos lecturas
+aceptadas, no hay separación temporal o existen datos no finitos;
+`DATOS_VARIABLES` cuando la desviación alcanza el umbral; y `CON_ATIPICOS`
+cuando IQR marca alguna lectura. Una lista vacía indica que ninguna de estas
+condiciones se cumple. Una ventana insuficiente devuelve pendiente y tiempo
+restante `None` y `hay_riesgo=False`; el diagnóstico permite distinguirla de
+una ventana evaluable sin riesgo.
+
+Se adopta inicialmente `umbral_std_temp=0.5` °C, configurable en
+`evaluar_riesgo()`. Es un criterio descriptivo operativo pendiente de validación
+por el equipo. Las métricas se calculan sobre la ventana completa, por lo que
+un spike puede activar tanto variabilidad como presencia de atípicos.
+
 ## 3. Fórmula del tiempo restante
 
 Con la pendiente ya calculada, se estima cuántos minutos faltan para que

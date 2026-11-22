@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from auth import manager
 from database import get_db
 from models import Chamber
 from schemas import ChamberCreate, ChamberRead, ChamberUpdate
@@ -19,7 +20,7 @@ def _get_chamber_or_404(db: Session, id_chamber: UUID) -> Chamber:
     return chamber
 
 
-# Permisos: técnico y gerente (TODO: agregar dependencia de auth cuando exista auth.py)
+# Permisos: técnico y gerente
 @router.get("", response_model=List[ChamberRead])
 def list_chambers(include_inactive: bool = False, db: Session = Depends(get_db)):
     """Lista las cámaras. Por defecto solo las activas."""
@@ -37,7 +38,7 @@ def get_chamber(id_chamber: UUID, db: Session = Depends(get_db)):
 
 
 # Permisos: solo gerente
-@router.post("", response_model=ChamberRead, status_code=status.HTTP_201_CREATED)
+@router.post("", dependencies=[Depends(manager)], response_model=ChamberRead, status_code=status.HTTP_201_CREATED)
 def create_chamber(data: ChamberCreate, db: Session = Depends(get_db)):
     """Crea una cámara nueva."""
     chamber = Chamber(**data.model_dump())
@@ -48,7 +49,7 @@ def create_chamber(data: ChamberCreate, db: Session = Depends(get_db)):
 
 
 # Permisos: solo gerente
-@router.put("/{id_chamber}", response_model=ChamberRead)
+@router.put("/{id_chamber}", dependencies=[Depends(manager)], response_model=ChamberRead)
 def update_chamber(id_chamber: UUID, data: ChamberUpdate, db: Session = Depends(get_db)):
     """Actualiza solo los campos enviados en el cuerpo de la petición."""
     chamber = _get_chamber_or_404(db, id_chamber)
@@ -60,7 +61,7 @@ def update_chamber(id_chamber: UUID, data: ChamberUpdate, db: Session = Depends(
 
 
 # Permisos: solo gerente
-@router.delete("/{id_chamber}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{id_chamber}", dependencies=[Depends(manager)], status_code=status.HTTP_204_NO_CONTENT)
 def delete_chamber(id_chamber: UUID, db: Session = Depends(get_db)):
     """Desactiva la cámara (borrado lógico), no elimina el registro."""
     chamber = _get_chamber_or_404(db, id_chamber)

@@ -1,7 +1,8 @@
 from contextlib import contextmanager
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 from config import DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+from models import Base
 
 DATABASE_URL = (
     f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}"
@@ -12,8 +13,6 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-Base = declarative_base()
-
 @contextmanager
 def get_session():
     session = SessionLocal()
@@ -23,5 +22,9 @@ def get_session():
         session.close()
 
 def crear_tablas():
-    import models
     Base.metadata.create_all(bind=engine)
+    # create_all no agrega columnas a tablas creadas en versiones anteriores.
+    with engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE predictions ADD COLUMN IF NOT EXISTS diagnostico JSON"
+        ))

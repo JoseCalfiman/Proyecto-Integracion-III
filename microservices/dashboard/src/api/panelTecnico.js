@@ -1,94 +1,65 @@
-// Cliente del Panel Técnico.
-// Todas las llamadas requieren rol "tecnico" (validado en el backend con JWT).
-
 import apiClient from './client';
 
-// ============================================================
-// ESTADO DE GATEWAYS (cámaras + MCUs)
-// Tabla: chambers + sensors
-// ============================================================
-export const getGateways = async () => {
+const errorApi = (error, mensaje) => {
+  const detalle = error.response?.data?.detail;
+  const codigo = error.response?.status;
+  const texto = typeof detalle === 'string' ? detalle : error.message;
+  return new Error(`${mensaje}${codigo ? ` (HTTP ${codigo})` : ''}: ${texto || 'sin detalle'}`);
+};
+
+const obtenerArreglo = async (path, params, mensaje) => {
   try {
-    const response = await apiClient.get('/panel/gateways');
-    return response.data;
+    const { data } = await apiClient.get(path, { params });
+    if (!Array.isArray(data)) {
+      throw new Error('La API no devolvió una lista válida');
+    }
+    return data;
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al obtener el estado de los gateways'
-    );
+    throw errorApi(error, mensaje);
   }
 };
 
-// ============================================================
-// ALERTAS DEL SISTEMA
-// Tabla: generated_alerts
-// ============================================================
-export const getAlertasSistema = async () => {
-  try {
-    const response = await apiClient.get('/panel/alertas');
-    return response.data;
-  } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al obtener las alertas del sistema'
-    );
-  }
-};
+// GET /api/v1/chambers: cámaras registradas/habilitadas.
+// IMPORTANTE: active=true NO demuestra conectividad (online/ping) del gateway.
+export const getCamarasTecnico = () =>
+  obtenerArreglo('/chambers', undefined, 'No se pudieron consultar las cámaras');
 
-// ============================================================
-// TRÁFICO DE RED (últimas 6 horas)
-// Tabla: sensor_data (agregación)
-// ============================================================
-export const getTraficoRed = async () => {
-  try {
-    const response = await apiClient.get('/panel/trafico');
-    return response.data;
-  } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al obtener el tráfico de red'
-    );
-  }
-};
+// GET /api/v1/alerts: alertas almacenadas (no "nuevas" ni solo activas).
+export const getAlertasSistema = () =>
+  obtenerArreglo('/alerts', { limit: 20, offset: 0 }, 'No se pudieron consultar las alertas');
 
-// ============================================================
-// INVENTARIO DE SENSORES
-// Tabla: sensors
-// ============================================================
-export const getSensores = async () => {
-  try {
-    const response = await apiClient.get('/panel/sensores');
-    return response.data;
-  } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al obtener el inventario de sensores'
-    );
-  }
-};
+// GET /api/v1/dashboard/temperature: agregados reales de temperatura.
+// No representa RX/TX ni bytes de red; el gráfico debe etiquetarse como temperatura.
+export const getTemperaturasTecnico = () =>
+  obtenerArreglo('/dashboard/temperature', { minutes: 360 }, 'No se pudo consultar la temperatura');
 
-// ============================================================
-// CALIBRAR SENSOR
-// Tabla: sensors (UPDATE)
-// ============================================================
+// D6: inventario físico de sensores. Si el backend aún no publica esta ruta,
+// el Panel muestra error explícito; NUNCA muestra sensores inventados.
+export const getSensores = () =>
+  obtenerArreglo('/panel/sensores', undefined, 'Inventario de sensores no disponible (pendiente de D6)');
+
+// Compatibilidad con posibles consumidores antiguos; NO usado por A3.
+// Estos endpoints dependen de D6 y fallan de forma visible si no existen.
+export const getGateways = () =>
+  obtenerArreglo('/panel/gateways', undefined, 'Estado de gateways no disponible (pendiente de D6)');
+
+export const getTraficoRed = () =>
+  obtenerArreglo('/panel/trafico', undefined, 'Tráfico de red no disponible (pendiente de D6)');
+
 export const calibrarSensor = async (sensorId) => {
   try {
-    const response = await apiClient.put(`/panel/calibrar/${sensorId}`);
-    return response.data;
+    const { data } = await apiClient.put(`/panel/calibrar/${encodeURIComponent(sensorId)}`);
+    return data;
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al calibrar el sensor'
-    );
+    throw errorApi(error, 'No se pudo calibrar el sensor');
   }
 };
 
-// ============================================================
-// VERIFICAR SALUD DE MICROSERVICIOS
-// Endpoint: /health de cada servicio
-// ============================================================
 export const verificarSalud = async () => {
   try {
-    const response = await apiClient.get('/panel/health');
-    return response.data;
+    const { data } = await apiClient.get('/panel/health');
+    return data;
   } catch (error) {
-    throw new Error(
-      error.response?.data?.detail || 'Error al verificar la salud del sistema'
-    );
+    throw errorApi(error, 'No se pudo verificar el estado del panel');
   }
 };

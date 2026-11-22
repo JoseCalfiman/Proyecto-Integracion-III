@@ -29,12 +29,24 @@ El Worker no crea tablas ni ejecuta migraciones: el esquema debe estar
 provisionado antes de iniciarlo.
 
 Las reglas activas se filtran por `active` y, si hay varias para una cámara, se
-selecciona la de `review_date` más reciente, igual que el criterio de consulta
-de reglas de Ingesta. Si dos reglas activas empatan en `review_date`, el orden
-elegido por la base de datos no está definido; un criterio de desempate sigue
-pendiente de decisión de negocio. Para persistir una alerta se utiliza la severidad
-configurada en la regla activa, compatible con los valores admitidos por
-PostgreSQL (`low`, `medium`, `high`, `critical`).
+selecciona la de `review_date` más reciente. Si dos reglas activas empatan en
+`review_date`, el orden elegido por la base de datos no está definido; un
+criterio de desempate sigue pendiente de decisión de negocio. La ruta GET de
+reglas de Ingesta actualmente selecciona por fecha sin filtrar por `active`, por
+lo que puede mostrar una regla distinta si la más reciente está inactiva. Para
+persistir una alerta se utiliza la severidad configurada en la regla activa,
+compatible con los valores admitidos por PostgreSQL (`low`, `medium`, `high`,
+`critical`).
+
+Antes de evaluar un evento, el Worker exige que la regla esté activa, que
+`min_absolute_temp < max_absolute_temp`, `tolerance_time_min > 0` y que
+`severity` sea uno de los valores admitidos por PostgreSQL. Una regla activa
+inválida detiene el procesamiento sin confirmar el offset.
+
+Si una cámara no tiene una regla activa (porque no tiene reglas o todas están
+inactivas), el Worker registra una advertencia, omite el evento sin evaluar ni
+crear una alerta, y confirma el offset. Por lo tanto, el Worker nunca genera una
+alerta sin una regla HACCP activa asociada.
 
 Los mensajes inválidos y los rechazos permanentes de datos o restricciones de
 PostgreSQL se registran, se descartan y se confirma su offset para evitar que
@@ -47,15 +59,24 @@ offset.
 ## Flujo del worker
 
 1. El consumidor escucha `sensor.anomaly` y valida su contrato.
-2. Obtiene la regla activa para la cámara mediante `get_active_rule`.
-3. Ejecuta `evaluate_predictive_event(payload, rule)`.
-4. Si hay infracción, inserta la alerta y agrega la auditoría `created` en la misma transacción.
-5. Confirma ambos registros mediante commit de PostgreSQL.
+2. Bloquea la fila de `predictions` correspondiente al `id_prediction` y busca
+   una alerta HACCP ya persistida para esa predicción.
+3. Si ya existe, reutiliza la alerta guardada y la vuelve a publicar; no crea
+   una nueva alerta ni auditoría.
+4. Si no existe, obtiene la regla activa para la cámara mediante `get_active_rule`
+   y ejecuta `evaluate_predictive_event(payload, rule)`.
+5. Si hay infracción, inserta la alerta y agrega la auditoría `created` en la misma
+   transacción, y confirma ambos registros mediante commit de PostgreSQL.
 6. Publica en `haccp.alerts` y espera confirmación de entrega Kafka.
 7. Confirma el offset de entrada de forma síncrona.
 
 Sin regla activa o sin infracción, no persiste ni publica y confirma el offset.
 Una regla activa inválida detiene el procesamiento sin confirmar el offset.
+Las alertas nuevas nacen en estado `active` y reciben una auditoría `created`
+en la misma transacción; los datos de reconocimiento y resolución quedan vacíos
+hasta que el técnico gestione esos estados por la API. Si se reprocesa una
+predicción cuya alerta ya está `resolved`, el Worker reutiliza y publica el
+registro existente sin cambiar sus campos ni añadir auditorías.
 
 ## Persistencia de `generated_alerts` (tarea 51)
 
@@ -73,9 +94,10 @@ Una regla activa inválida detiene el procesamiento sin confirmar el offset.
 PostgreSQL/TimescaleDB es la base de despliegue. SQLite en memoria se utiliza
 exclusivamente como sustituto en pruebas unitarias; no es una alternativa de despliegue.
 El Worker valida el formato UUID y el tipo/rango del ID de predicción. La existencia
-de cámara, predicción y regla se garantiza mediante las claves foráneas de PostgreSQL,
-sin consultas previas adicionales a predicciones. No se comprueba que la predicción
-pertenezca a la misma cámara; las FK independientes no garantizan esa relación.
+de cámara, predicción y regla se garantiza mediante las claves foráneas de PostgreSQL.
+Antes de evaluar un evento, el Worker bloquea la fila de predicción y busca una alerta
+existente por `id_prediction`; no se comprueba que la predicción pertenezca a la misma
+cámara, ya que las FK independientes no garantizan esa relación.
 
 El manejador considera `IntegrityError` y `DataError` rechazos permanentes: registra,
 descarta y confirma el offset, sin publicar. `DisconnectionError`, `InterfaceError`,
@@ -85,12 +107,23 @@ Los demás errores SQLAlchemy se registran y propagan sin confirmar. Al cerrar l
 sesión se revierte la transacción pendiente; alerta y auditoría no se confirman por separado.
 Un fallo Kafka se propaga sin confirmar el offset y no activa los reintentos de BD.
 
-PostgreSQL y Kafka no comparten una transacción atómica. Si PostgreSQL confirma y
-Kafka falla, reprocesar puede crear otra alerta. También puede duplicarse tras una
-entrega Kafka seguida de un fallo al confirmar el offset, o si se pierde la respuesta
-del commit PostgreSQL y se reintenta un commit cuyo resultado era incierto. No hay
-outbox ni idempotencia. Una FK faltante se descarta incluso si su causa fuera que
-el productor publicó antes de confirmar la predicción.
+La fila de predicción se bloquea con `FOR UPDATE` mientras se busca y, si corresponde,
+se crea la alerta. Esto serializa los workers que usan este mecanismo para una misma
+predicción; distintas predicciones pueden procesarse en paralelo. Una alerta existente
+se reutiliza, junto con su mensaje y `id_alert`, sin crear otra fila de alerta o auditoría.
+No se modificó el esquema: no hay restricción UNIQUE para `generated_alerts.id_prediction`,
+por lo que los escritores ajenos a este Worker no quedan protegidos por esta exclusión;
+los duplicados históricos tampoco se eliminan automáticamente.
+
+PostgreSQL y Kafka no comparten una transacción atómica ni hay outbox. Si PostgreSQL
+confirma y Kafka falla, el offset de entrada queda sin confirmar; en la reentrega el
+Worker encuentra la alerta existente y vuelve a publicar el mismo `id_alert` antes de
+confirmar el offset. Si Kafka entregó el mensaje, pero se perdió la confirmación de
+entrega o falla el commit del offset, el tópico de salida puede recibir nuevamente ese
+mismo `id_alert`. Por ello se evita crear alertas y auditorías persistentes duplicadas,
+pero la entrega sigue siendo al menos una vez, no exactamente una vez; los consumidores
+de `haccp.alerts` pueden deduplicar por `id_alert`. Una FK faltante se descarta incluso
+si su causa fuera que el productor publicó antes de confirmar la predicción.
 
 Las pruebas negativas inyectan errores para verificar transacciones, descarte,
 reintentos, propagación y ausencia de publicación. No acreditan integridad referencial
@@ -117,8 +150,9 @@ prueba de integración ejecutada durante el cierre documental de la tarea 51.
 ## Ejecutar con Docker
 
 ```bash
-docker build -t worker-haccp .
-docker run --rm --env-file .env worker-haccp
+# Desde la raíz del repositorio
+docker build -t worker-haccp -f microservices/worker-haccp/Dockerfile microservices/worker-haccp
+docker run --rm --env-file .env -p 8080:8080 worker-haccp
 ```
 
 ## Dependencias

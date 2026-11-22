@@ -173,3 +173,104 @@ Pruebas focalizadas de consultas y contrato, sin servicios externos:
 ```bash
 venv/bin/python -m unittest discover -s microservices/ingesta/tests -p test_predictions.py
 ```
+
+### D4: estadísticas descriptivas por cámara
+
+`GET /api/v1/stats/chambers/{id_chamber}?desde=2026-10-24&hasta=2026-10-25`
+
+Requiere la misma autenticación que historial. UUID y ambos filtros son obligatorios.
+Las fechas usan las mismas reglas UTC de historial: `hasta` sin hora abarca el día
+completo; con hora incluye el instante indicado. Filtros inválidos devuelven 422.
+Se consideran todas las lecturas del intervalo, sin límite ni paginación.
+
+El JSON contiene `id_chamber`, `temperature` (°C) y `consumption_kw` (kW).
+Cada variable incluye `n`, `media`, `mediana`, `minimo`, `maximo`,
+`desviacion_estandar`, `q1`, `q3` e `iqr`. Los nulos se excluyen por variable;
+`n` puede ser distinto entre temperatura y consumo. Una cámara sin lecturas
+(incluso un UUID inexistente) devuelve 200, `n=0` y métricas `null`.
+Un solo dato devuelve desviación e IQR iguales a cero.
+
+Convenciones: desviación poblacional `sqrt(sum((x-media)^2)/n)`; cuartiles
+por interpolación lineal en la posición `(n-1)*p` del vector ordenado, con
+índices desde cero (`p=0.25` y `0.75`, equivalente a `percentile_cont` de
+PostgreSQL). `iqr=q3-q1`. No se redondea antes de responder. Estas convenciones
+quedan pendientes de contraste con `Capitulo_1.pdf`, que no está en el repositorio.
+El consumo se resume como potencia en kW, sin convertirlo a energía en kWh.
+
+Validación reproducible, sin modificar la base de desarrollo:
+
+```bash
+venv/bin/python -B -m unittest discover -s microservices/ingesta/tests -p test_stats.py -v
+```
+
+La prueba HTTP carga en SQLite la cámara `55555555-5555-5555-5555-555555555555`
+y contrasta todas las métricas con estos cálculos manuales:
+
+| Rango UTC | Variable y datos no nulos | n | Media | Mediana | Mín. | Máx. | Desv. poblacional | Q1 | Q3 | IQR |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-24 | T: -20, -18, -16 | 3 | -18 | -18 | -20 | -16 | √(8/3) | -19 | -17 | 2 |
+| 2026-10-24 | C: 1, 2, 3 | 3 | 2 | 2 | 1 | 3 | √(2/3) | 1.5 | 2.5 | 1 |
+| 2026-10-24 a 2026-10-25 | T: -20, -18, -16, -14 | 4 | -17 | -17 | -20 | -14 | √5 | -18.5 | -15.5 | 3 |
+| 2026-10-24 a 2026-10-25 | C: 1, 2, 3, 4, 5 | 5 | 3 | 3 | 1 | 5 | √2 | 2 | 4 | 2 |
+
+También verifica separación entre cámaras, valores nulos, intervalos vacíos,
+un solo dato, zonas horarias, límites inclusivos y validación de parámetros.
+
+### Resumen para gerente (D5)
+
+`GET /api/v1/stats/summary?desde=2026-10-24&hasta=2026-10-25&top=10`
+
+Usa la autenticación y las reglas de fechas de D4. `desde` y `hasta` son
+obligatorios; `top` es opcional (10 por defecto, entre 1 y 100).
+
+- `chambers`: todas las cámaras activas, ordenadas por UUID, con `id_chamber`,
+  `name`, estadísticas D4 en `temperature` y `consumption_kw`,
+  `consumption_total_kw`, `alerts`, `critical_alerts` y `pending_recommendations`.
+- `consumption_total_kw`: suma de muestras no nulas del período. Es una suma
+  de potencia registrada, **no energía en kWh**; depende de la frecuencia de
+  muestreo. Sin muestras válidas devuelve `null`, al igual que las medias.
+- `alerts`: alertas generadas en el período, cualquiera sea su estado actual;
+  `critical_alerts`: subconjunto con severidad `critical`.
+- `pending_recommendations`: recomendaciones creadas en el período cuyo estado
+  actual es `pending`; no reconstruye el estado histórico al cierre del rango.
+- `rankings.top_alerts` y `rankings.top_consumption`: hasta `top` entradas con
+  `id_chamber`, `name` y `value`, orden descendente por número de alertas y suma
+  de consumo, respectivamente. Los empates se resuelven por UUID ascendente.
+  Las cámaras sin consumo válido se excluyen del ranking de consumo; las que
+  tienen cero alertas sí participan en el de alertas.
+
+La suite `test_stats.py` comprueba diez cámaras activas con datos sintéticos,
+una inactiva, rankings con valores esperados, empates, rangos, nulos y filtros
+inválidos. Ejecutar con el comando de D4. La validación con datos reales requiere
+la base de desarrollo en ejecución: contrastar `chambers` con las cámaras
+activas y los rankings con `COUNT(*)` de `generated_alerts` y
+`SUM(consumption_kw)` de `sensor_data`, filtrados por el mismo período y
+ordenados por valor descendente e `id_chamber` ascendente.
+
+### Panel técnico (D6)
+
+Las cuatro rutas `/api/v1/panel/{gateways,alertas,sensores,health}` requieren
+Bearer de un usuario activo con rol `tecnico` (401 sin token, 403 para gerente).
+
+- `gateways`: array de todas las cámaras, incluidas inactivas; `id` es
+  `chambers.id_chamber`, `sensores` cuenta sensores asociados. No existe tabla
+  de gateways/MCUs: se representa la cámara, sin generar dispositivos.
+  `estado=unknown` y `ping_ms=null`: no hay heartbeat ni ping medido.
+  `ultima_conexion` conserva el nombre del contrato visual, pero representa
+  exclusivamente el máximo `sensor_data.timestamp` de la cámara, no un ping.
+- `sensores`: array de `sensors`, con `id=id_sensor`, estado administrativo
+  original, cámara y datos de inventario. `ultima_lectura` usa únicamente
+  lecturas asociadas por `id_sensor`; no atribuye lecturas de cámara sin sensor.
+  `bateria=null` porque no existe esa telemetría.
+- `alertas`: array de todas las alertas registradas, incluidos estados resueltos,
+  ordenado por fecha descendente (nulos al final) e ID descendente. Conserva
+  ID, cámara, severidad (`codigo`), estado y mensaje originales.
+- `health`: HTTP 200 con `status=ok|degraded`, `checked_at` UTC y `checks` de
+  DB/Kafka/MQTT. DB y Kafka reutilizan las comprobaciones acotadas de `/ready`;
+  MQTT refleja `is_connected()` del cliente real de este proceso. No afirma
+  conocer la salud de todos los microservicios. Un fallo se informa como `error`.
+
+Las consultas de inventario no convierten errores de base de datos en arrays
+vacíos. Un array vacío significa que no hay registros. La pantalla elimina los
+mocks, el uptime fijo y el gráfico de tráfico ficticio; los datos no disponibles
+se indican explícitamente. No se requieren migraciones ni modelos nuevos.

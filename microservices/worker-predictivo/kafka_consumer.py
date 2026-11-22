@@ -73,9 +73,11 @@ class PredictiveKafkaWorker:
         )
         self.producer.flush()
 
-    def _actualizar_buffer(self, id_chamber, timestamp, temperature):
+    def _actualizar_buffer(self, id_chamber, timestamp, temperature, consumption_kw=None):
         buffer = self.buffers[id_chamber]
-        agregado = actualizar_ventana(buffer, timestamp, temperature, VENTANA_MINUTOS)
+        agregado = actualizar_ventana(
+            buffer, timestamp, temperature, VENTANA_MINUTOS, consumption_kw,
+        )
         return buffer, agregado
 
     def _procesar_mensaje(self, msg):
@@ -97,6 +99,7 @@ class PredictiveKafkaWorker:
             id_chamber,
             timestamp,
             temperature,
+            lectura.consumption_kw,
         )
 
         if not agregado:
@@ -144,7 +147,8 @@ class PredictiveKafkaWorker:
                 f"[{id_chamber}] "
                 f"pendiente={resultado['pendiente_por_minuto']} "
                 f"tiempo_restante_min={resultado['tiempo_restante_min']} "
-                f"nivel_riesgo={resultado['nivel_riesgo']}"
+                f"nivel_riesgo={resultado['nivel_riesgo']} "
+                f"diagnostico={resultado['diagnostico']}"
             )
 
             projected_temperature = (
@@ -162,6 +166,7 @@ class PredictiveKafkaWorker:
                     projected_temperature=projected_temperature,
                     remaining_time_min=resultado["tiempo_restante_min"],
                     risk_level=mapear_risk_level(resultado["nivel_riesgo"]),
+                    diagnostico=resultado["diagnostico"],
                 )
                 prediction_id = prediccion_obj.id_prediction
             except Exception:

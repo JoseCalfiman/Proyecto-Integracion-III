@@ -91,6 +91,3 @@ red `frigorifico-net`. Los puertos publicados son `80`, `1883`, `5432`,
   de levantar todo el `docker-compose.yml`.
 - El `Dockerfile` del dashboard esta vacio, por lo que el servicio dashboard no
   puede construirse con Docker hasta completarlo.
-- El README del worker HACCP menciona Redis, pero Redis no aparece definido en
-  `docker-compose.yml`; el diagrama representa Kafka, que es el broker definido
-  actualmente en la composicion.
