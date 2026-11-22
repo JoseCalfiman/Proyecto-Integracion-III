@@ -25,8 +25,12 @@ from sqlalchemy.exc import (
 from sqlalchemy.orm import Session
 
 from config import get_database_url
-from crud import DEFAULT_RULE_VALUES, get_active_rule
+from crud import (
+    get_active_rule,
+    lock_prediction_and_get_alert,
+)
 from haccp_validator import (
+    ALLOWED_HACCP_SEVERITIES,
     HaccpRuleConfigurationError,
     evaluate_predictive_event,
 )
@@ -38,7 +42,7 @@ TOPIC_ANOMALY = "sensor.anomaly"
 TOPIC_ALERTS = "haccp.alerts"
 GROUP_ID = "haccp-worker-group"
 BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-ALLOWED_ALERT_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
+ALLOWED_ALERT_SEVERITIES = ALLOWED_HACCP_SEVERITIES
 ALLOWED_RISK_LEVELS = frozenset({"SIN_RIESGO", "CRITICO", "ALTO", "MEDIO", "BAJO"})
 MAX_BIGINT = 2**63 - 1
 MAX_DATABASE_ATTEMPTS = 3
@@ -260,32 +264,52 @@ def _persist_audit(session: Session, alert_id: int, action: str, detail: str) ->
     session.add(audit)
 
 
+def _publication_payload_for_alert(alert: GeneratedAlert) -> dict:
+    generation_date = alert.generation_date
+    if generation_date.tzinfo is None:
+        generation_date = generation_date.replace(tzinfo=timezone.utc)
+    else:
+        generation_date = generation_date.astimezone(timezone.utc)
+    return {
+        "id_alert": alert.id_alert,
+        "id_chamber": str(alert.id_chamber),
+        "id_prediction": alert.id_prediction,
+        "alert_type": alert.alert_type,
+        "severity": alert.severity,
+        "status": alert.status,
+        "message": alert.message,
+        "generation_date": generation_date.isoformat().replace("+00:00", "Z"),
+    }
+
+
 def process_alert(payload: dict) -> None:
     payload = _validate_anomaly_contract(payload)
     chamber_id = payload["id_chamber"]
     with Session(get_engine()) as session:
+        existing_alert = lock_prediction_and_get_alert(
+            session,
+            payload["id_prediction"],
+        )
+        if existing_alert is not None:
+            existing_alert_id = existing_alert.id_alert
+            publication_payload = _publication_payload_for_alert(existing_alert)
+            session.commit()
+            publish_haccp_alert(publication_payload)
+            logger.info(
+                "Predicción %s ya tenía la alerta HACCP %s; se reutilizó",
+                payload["id_prediction"],
+                existing_alert_id,
+            )
+            return
+
         rule = get_active_rule(session, chamber_id)
         if rule is None:
             logger.warning(
                 "No existe regla HACCP activa para la cámara %s; "
-                "se utiliza la regla predeterminada",
+                "se omite el evento sin generar alerta",
                 chamber_id,
             )
-            rule = DEFAULT_RULE_VALUES.copy()
-
-        rule_severity = (
-            rule.get("severity")
-            if isinstance(rule, Mapping)
-            else getattr(rule, "severity", None)
-        )
-        if (
-            not isinstance(rule_severity, str)
-            or rule_severity not in ALLOWED_ALERT_SEVERITIES
-        ):
-            raise HaccpRuleConfigurationError(
-                f"Severidad de regla HACCP inválida para cámara {chamber_id}: "
-                f"{rule_severity!r}"
-            )
+            return
 
         validation = evaluate_predictive_event(payload, rule)
         if not validation["is_alert"]:
@@ -297,6 +321,11 @@ def process_alert(payload: dict) -> None:
             )
             return
 
+        rule_severity = (
+            rule.get("severity")
+            if isinstance(rule, Mapping)
+            else getattr(rule, "severity", None)
+        )
         alert_payload = _alert_payload_from_message(payload)
         alert_payload["severity"] = rule_severity
         alert_payload["message"] = validation["message"]
@@ -307,18 +336,7 @@ def process_alert(payload: dict) -> None:
             "created",
             f"Alerta HACCP validada para cámara {chamber_id}.",
         )
-        # Snapshot flushed values before commit expires the ORM instance.
-        publication_payload = {
-            "id_alert": alert.id_alert,
-            "id_chamber": str(alert.id_chamber),
-            "id_prediction": alert.id_prediction,
-            "alert_type": alert.alert_type,
-            "severity": alert.severity,
-            "status": alert.status,
-            "message": alert.message,
-            "generation_date": alert.generation_date.astimezone(timezone.utc)
-            .isoformat().replace("+00:00", "Z"),
-        }
+        publication_payload = _publication_payload_for_alert(alert)
         session.commit()
 
         # Publication errors propagate: the source offset must remain uncommitted.

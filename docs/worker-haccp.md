@@ -70,6 +70,9 @@ En otra terminal, consulta `http://localhost:8080/health` y
 las variables de base de datos y Kafka:
 
 ```powershell
+# Desde la raíz del repositorio, construir la imagen:
+docker build -t worker-haccp -f microservices/worker-haccp/Dockerfile microservices/worker-haccp
+# Luego iniciar el contenedor:
 docker run --rm --env-file .env -p 8080:8080 worker-haccp
 ```
 
@@ -135,33 +138,31 @@ El worker define una regla predeterminada para `haccp_rules` en `crud.py`. `vali
 | `severity` | `medium` | Severidad compatible con `haccp_rules` y `generated_alerts` |
 | `active` | `true` | Indica que la regla está activa |
 
-La evaluación legacy de lecturas y series convierte `tolerance_time_min` a una duración mínima en segundos. La decisión predictiva descrita abajo usa directamente la tolerancia en minutos y no convierte el tiempo restante en duración de exposición.
+`DEFAULT_RULE_VALUES` se usa al invocar explícitamente
+`create_default_rules_for_all_chambers`; no se aplica automáticamente cuando el
+consumidor predictivo no encuentra una regla activa. La evaluación legacy de
+lecturas y series convierte `tolerance_time_min` a una duración mínima en
+segundos. La decisión predictiva descrita abajo usa directamente la tolerancia
+en minutos y no convierte el tiempo restante en duración de exposición.
 
-### Fallback cuando no existe regla activa
+### Cámara sin regla activa
 
-Si la consulta de reglas para una cámara termina correctamente y no devuelve una
-regla activa, el Worker evalúa el evento con la configuración determinista de
-`DEFAULT_RULE_VALUES`: `min_absolute_temp = -30.00 °C`,
-`max_absolute_temp = 4.00 °C`, `tolerance_time_min = 15` y `severity = medium`.
-La regla se usa sólo en memoria: no se inserta una fila en `haccp_rules` ni se
-inventa un `id_rule`. Si hay infracción, la alerta se persiste con
-`id_haccp_rule = NULL`, el `id_prediction` original, la severidad predeterminada
-y su auditoría `created`; después sigue el flujo normal de publicación. Si no
-hay infracción, no se persiste ni publica. En ambos casos se confirma el offset
-y el consumidor continúa; antes de evaluar se registra un `WARNING` que incluye
-el `id_chamber` y deja explícito el uso de la regla predeterminada.
+Si la consulta termina correctamente y no encuentra una regla activa, el Worker
+registra un `WARNING` con el `id_chamber`, omite el evento sin evaluarlo ni
+crear una alerta y confirma el offset. Esto aplica tanto si no hay reglas como
+si todas están inactivas. Por lo tanto, una alerta nueva siempre tiene una regla
+HACCP activa asociada.
 
-Este fallback sólo aplica al resultado `None` de una consulta completada. Los
-errores de conexión/SQLAlchemy siguen el tratamiento de errores de base de datos
-y una regla activa inválida sigue siendo un error de configuración: ninguno de
-esos casos se oculta ni se sustituye por defaults.
+Un error de conexión/SQLAlchemy no se trata como ausencia de regla. Una regla
+activa inválida también es un error de configuración: el Worker no la sustituye
+por defaults y deja el offset sin confirmar.
 
 ## Estado de integración
 
-El consumidor valida el contrato de `sensor.anomaly` y obtiene la regla HACCP
-activa para la cámara o utiliza el fallback predeterminado documentado si no la
-hay. La decisión predictiva genera una alerta si se cumple
-cualquiera de estas condiciones:
+El consumidor valida el contrato de `sensor.anomaly` y obtiene una regla HACCP
+activa para la cámara. Sin ella, omite el evento y confirma el offset, sin
+generar alerta. Con una regla activa válida, la decisión predictiva genera una
+alerta si se cumple cualquiera de estas condiciones:
 
 - `temperature < min_absolute_temp`
 - `temperature > max_absolute_temp`
@@ -178,13 +179,13 @@ una duración de exposición. Esta decisión no lo transforma en
 `evaluate_temperature_series` y `validar_haccp` conservan su semántica para
 lecturas/series y siguen trabajando con temperatura y duración.
 
-La decisión utiliza los límites y tolerancia de la regla activa de la cámara o
-los defaults sólo ante ausencia confirmada de una regla activa. Una regla activa
-con parámetros requeridos nulos, no finitos, incompatibles, rango
-invertido o tolerancia negativa se trata como error de configuración: el offset
-no se confirma y el procesamiento se detiene para evitar un ciclo de reintentos
-sin límite. La severidad persistida y publicada procede de la regla activa o del
-fallback `medium`, valores admitidos por PostgreSQL.
+La decisión usa exclusivamente los límites, tolerancia y severidad de la regla
+activa. Una regla con estado inactivo, severidad inválida, parámetros requeridos
+nulos/no finitos/incompatibles, `min_absolute_temp >= max_absolute_temp` o
+`tolerance_time_min <= 0` se trata como error de configuración: el offset no se
+confirma y el procesamiento se detiene. La severidad persistida y publicada
+procede siempre de la regla activa y es uno de los valores admitidos por
+PostgreSQL.
 
 ## Contrato de `sensor.anomaly`
 
@@ -228,11 +229,10 @@ normaliza el identificador al campo interno `id_chamber`. Si se reciben ambos,
 deben representar el mismo UUID; un `id_chamber` inválido no se sustituye con el
 alias y dos identificadores distintos invalidan el mensaje.
 
-El Worker Predictivo, mantenido por otro integrante, actualmente publica
-`chamber_id` pero no incluye `id_prediction`. El consumidor requiere un
-`id_prediction` BIGINT positivo, por lo que los eventos de ese productor siguen
-siendo rechazados hasta coordinar e implementar esa compatibilidad en el
-microservicio Predictivo. Esta tarea no modifica ese productor.
+El contrato publicado actualmente por el Worker Predictivo incluye
+`id_prediction` BIGINT, `id_chamber`, temperatura, tiempo restante, severidad,
+nivel de riesgo y fecha. El consumidor también acepta temporalmente `chamber_id`
+como alias de `id_chamber`.
 
 El consumidor registra con nivel `WARNING` los mensajes malformados o con
 contrato incompleto/inválido, incluyendo el campo o motivo específico, los
@@ -281,10 +281,16 @@ la persistencia por un fallo Kafka. El orden exitoso es: commit PostgreSQL,
 confirmación Kafka y commit síncrono del offset.
 
 No existe una transacción atómica entre PostgreSQL y Kafka. Si PostgreSQL confirma
-y Kafka falla, la alerta y auditoría quedan persistidas. Al reiniciar, reprocesar el
-evento puede crear otra alerta con otro ID. También puede repetirse una publicación
-si Kafka entrega y el proceso cae antes del commit del offset. La key no deduplica.
-Esta tarea no incorpora outbox, idempotencia ni cambios de esquema.
+y Kafka falla, la alerta y auditoría quedan persistidas y el offset no se confirma.
+Al reprocesarse el evento, el Worker bloquea la fila de la predicción, encuentra
+la alerta existente por `id_prediction` y vuelve a publicar el mismo `id_alert`,
+sin insertar otra alerta ni auditoría. También puede repetirse una publicación si
+Kafka entregó el mensaje, pero se perdió la confirmación o falló el commit del
+offset. Por eso el procesamiento evita duplicados persistentes entre instancias
+de este Worker, pero la entrega del tópico sigue siendo al menos una vez; sus
+consumidores pueden deduplicar por `id_alert`. No hay una restricción `UNIQUE`
+que proteja contra escritores ajenos a este mecanismo, ni se incorporó un outbox
+o cambio de esquema.
 
 Las pruebas unitarias del productor simulan callbacks, mensajes pendientes y errores;
 las de procesamiento verifican contrato, fecha, descartes y orden de confirmación.
@@ -303,7 +309,7 @@ unitarias y no sustituye la base real. `_persist_generated_alert` guarda:
 |---|---|
 | `id_chamber` | UUID del evento, validado y normalizado |
 | `id_prediction` | Entero positivo hasta `2**63 - 1`, obligatorio en el contrato |
-| `id_haccp_rule` | `id_rule` de la regla activa; `NULL` si se usó el fallback en memoria |
+| `id_haccp_rule` | `id_rule` de la regla activa aplicada |
 | `alert_type` | Valor fijo `haccp_violation` |
 | `severity` | Regla aplicada, con valor `low`, `medium`, `high` o `critical` |
 | `status` | Valor inicial `active` |
@@ -328,8 +334,8 @@ habilitan FK ni se presentan como evidencia de integridad referencial real.
 | Resultado o error | Comportamiento y offset |
 |---|---|
 | Contrato inválido, UUID incorrecto o campo obligatorio ausente | Registra y descarta; confirma offset |
-| Sin regla activa | Emite `WARNING` con `id_chamber`, evalúa con defaults y continúa |
-| Sin infracción, incluso con regla predeterminada | No persiste ni publica; confirma offset |
+| Sin regla activa | Emite `WARNING` con `id_chamber`, omite el evento; confirma offset |
+| Sin infracción con regla activa | No persiste ni publica; confirma offset |
 | Regla activa inválida | Registra y propaga; no confirma |
 | `IntegrityError` o `DataError` | Registra y descarta; confirma offset sin publicar |
 | `DisconnectionError`, `InterfaceError`, `OperationalError`, timeout SQLAlchemy | Hasta tres intentos, con esperas de 1 y 2 segundos; agotamiento propaga `TransientDatabaseError` sin confirmar |
@@ -339,11 +345,16 @@ habilitan FK ni se presentan como evidencia de integridad referencial real.
 La clasificación no distingue las causas particulares de `IntegrityError`: una FK
 faltante se descarta aunque provenga de una predicción todavía no confirmada por el
 productor. La publicación debe realizarse después de confirmar esa predicción.
-Los reintentos no aseguran ausencia de duplicados si PostgreSQL confirmó pero se
-perdió la respuesta del commit. Se mantienen además los riesgos PostgreSQL–Kafka
-descritos en la tarea 52; no se incorporan outbox ni idempotencia.
+La deduplicación del Worker se basa en bloquear la predicción y buscar una alerta
+existente; no elimina duplicados históricos ni protege escritores que no usen ese
+mecanismo. Se mantienen los riesgos de entrega PostgreSQL–Kafka descritos arriba.
 
 ### Cobertura y validaciones externas pendientes
+
+Las pruebas de procesamiento verifican también que una alerta nueva inicie en
+`active` con auditoría `created`, y que reprocesar una alerta `resolved` conserve
+su estado, usuarios, fechas y auditorías sin agregar registros. Esto verifica el
+comportamiento del Worker sobre SQLite; no ejecuta las transiciones de la API.
 
 Las pruebas negativas inyectan `IntegrityError`, `DataError` y errores SQLAlchemy en
 el flush de la alerta, la inserción de auditoría o el commit. Verifican ausencia de
