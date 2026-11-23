@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 # Minimo de observaciones diarias para poder ajustar Prophet.
 MIN_DAILY_POINTS = 2
+DAILY_FREQUENCY = "D"
 
 
 def summarize_consumption_window(df: pd.DataFrame | None) -> dict[str, float | int]:
@@ -98,6 +99,10 @@ def prepare_prophet_history(df: pd.DataFrame | None) -> pd.DataFrame | None:
         }
     )
     history = history.dropna(subset=["ds", "y"])
+    history = history[
+        np.isfinite(history["y"].to_numpy(dtype=float))
+        & (history["y"] >= 0)
+    ]
     if history.empty:
         return None
 
@@ -111,7 +116,30 @@ def prepare_prophet_history(df: pd.DataFrame | None) -> pd.DataFrame | None:
     history["y"] = history["y"].astype(float)
     if len(history) < MIN_DAILY_POINTS:
         return None
+    if not history["ds"].is_unique or not history["ds"].is_monotonic_increasing:
+        return None
+    if len(history) > 1 and not (history["ds"].diff().iloc[1:] == pd.Timedelta(days=1)).all():
+        logger.warning("[optimizer] historial diario discontinuo; se omite el pronostico")
+        return None
     return history
+
+
+def validate_forecast(forecast: pd.DataFrame | None) -> bool:
+    """Valida fechas diarias y valores finitos del resultado de Prophet."""
+    required = {"ds", "yhat", "yhat_lower", "yhat_upper"}
+    if not isinstance(forecast, pd.DataFrame) or not required.issubset(forecast.columns):
+        return False
+    dates = pd.to_datetime(forecast["ds"], utc=True, errors="coerce")
+    if dates.isna().any() or not dates.is_monotonic_increasing or not dates.is_unique:
+        return False
+    if not (dates.dt.floor("D") == dates).all():
+        return False
+    if len(dates) > 1 and not (dates.diff().iloc[1:] == pd.Timedelta(days=1)).all():
+        return False
+    values = forecast[["yhat", "yhat_lower", "yhat_upper"]].apply(
+        pd.to_numeric, errors="coerce"
+    )
+    return bool(np.isfinite(values.to_numpy(dtype=float)).all())
 
 
 def _history_without_outliers(
@@ -193,6 +221,9 @@ def forecast_daily_consumption(
         )
         future = model.make_future_dataframe(periods=periods, freq=freq)
         forecast = model.predict(future)
+        if not validate_forecast(forecast):
+            logger.warning("[optimizer] Prophet devolvio fechas o valores no validos")
+            return None
         forecast.attrs["consumption_outliers"] = outliers
         return forecast
     except Exception as exc:

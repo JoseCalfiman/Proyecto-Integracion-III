@@ -65,13 +65,21 @@ def recommendations(id_chamber: Optional[UUID] = None, db: Session = Depends(get
 def forecast(id_chamber: Optional[UUID] = None, db: Session = Depends(get_db)):
     """Pronóstico diario en kWh, sumado por fecha para las cámaras seleccionadas.
 
-    El worker persiste kWh diarios en la columna histórica predicted_consumption_kw.
+    El worker persiste energía diaria (kWh) en la columna histórica
+    ``predicted_consumption_kw``; el sufijo ``_kw`` es legado y no representa
+    potencia instantánea.
     No hay datos históricos ni bandas de confianza en esta tabla.
     """
     query = db.query(
         PredictedConsumption.prediction_date,
         func.sum(PredictedConsumption.predicted_consumption_kw).label("pronostico"),
-    ).filter(PredictedConsumption.prediction_date.isnot(None))
+    ).filter(
+        PredictedConsumption.prediction_date.isnot(None),
+        or_(
+            PredictedConsumption.predicted_consumption_kw.is_(None),
+            PredictedConsumption.predicted_consumption_kw >= 0,
+        ),
+    )
     if id_chamber is not None:
         query = query.filter(PredictedConsumption.id_chamber == id_chamber)
     rows = query.group_by(PredictedConsumption.prediction_date).order_by(

@@ -24,7 +24,7 @@ class SavingRecommendationRead(BaseModel):
 
 class ConsumptionForecastRead(BaseModel):
     date: date
-    pronostico: Optional[float] = None
+    pronostico: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
     historico: Optional[float] = None
 
 

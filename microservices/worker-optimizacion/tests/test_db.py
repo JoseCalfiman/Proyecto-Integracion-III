@@ -213,6 +213,12 @@ def test_save_predicted_consumption_uses_official_chamber_column(monkeypatch):
     assert params == ("44444444-4444-4444-4444-444444444444", "2024-01-08", 42.5)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.0])
+def test_save_predicted_consumption_rejects_invalid_daily_kwh(value):
+    with pytest.raises(ValueError, match="finito no negativo"):
+        db.save_predicted_consumption("2024-01-08", value)
+
+
 def test_save_saving_recommendations_inserts_savings_percentage(monkeypatch):
     factory = _fake_get_connection([])
     monkeypatch.setattr(db, "get_connection", factory)

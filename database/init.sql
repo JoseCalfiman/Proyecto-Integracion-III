@@ -132,6 +132,8 @@ CREATE TABLE predicted_consumption (
   id_consumption_prediction BIGSERIAL PRIMARY KEY,
   id_chamber UUID REFERENCES chambers(id_chamber) ON DELETE CASCADE,
   prediction_date DATE,
+  -- Nombre histórico: representa energía diaria pronosticada en kWh,
+  -- no potencia instantánea en kW.
   predicted_consumption_kw NUMERIC(8,3),
   UNIQUE (id_chamber, prediction_date),
   generation_date TIMESTAMPTZ DEFAULT NOW()

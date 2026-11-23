@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from math import isfinite
 from contextlib import contextmanager
 from datetime import date
 from typing import Any, Iterator
@@ -195,6 +196,17 @@ def save_predicted_consumption(
     predicted_kwh: float,
     id_chamber: str | None = None,
 ) -> bool:
+    """Guarda energia pronosticada por dia en kWh.
+
+    ``predicted_consumption_kw`` es un nombre histórico de la tabla; su unidad
+    contractual es kWh diarios, no potencia instantánea en kW.
+    """
+    try:
+        predicted_kwh = float(predicted_kwh)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("predicted_kwh debe ser un numero finito en kWh") from exc
+    if not isfinite(predicted_kwh) or predicted_kwh < 0:
+        raise ValueError("predicted_kwh debe ser un numero finito no negativo")
     chamber_uuid = _normalize_chamber_id(id_chamber)
     with get_connection() as conn:
         if conn is None:
@@ -327,6 +339,13 @@ def save_report(report: dict[str, Any]) -> bool:
 
     if predicted_kwh is None:
         predicted_kwh = report.get("forecasted_kwh")
+    if predicted_kwh is not None:
+        try:
+            predicted_kwh = float(predicted_kwh)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("predicted_kwh debe ser un numero finito en kWh") from exc
+        if not isfinite(predicted_kwh) or predicted_kwh < 0:
+            raise ValueError("predicted_kwh debe ser un numero finito no negativo")
 
     recommendations = [
         rec

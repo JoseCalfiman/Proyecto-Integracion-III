@@ -70,6 +70,18 @@ def test_prepare_prophet_history_returns_none_when_data_is_missing():
     assert prepare_prophet_history(missing) is None
 
 
+def test_prepare_prophet_history_rejects_gaps_and_non_finite_consumption():
+    gap = pd.DataFrame(
+        {"ds": ["2024-01-01", "2024-01-03"], "y": [4.0, 5.0]}
+    )
+    invalid = pd.DataFrame(
+        {"ds": ["2024-01-01", "2024-01-02"], "y": [4.0, float("inf")]}
+    )
+
+    assert prepare_prophet_history(gap) is None
+    assert prepare_prophet_history(invalid) is None
+
+
 def test_summarize_consumption_window_returns_basic_statistics():
     summary = summarize_consumption_window(
         pd.DataFrame({"y": [2.0, 4.0, 6.0, float("nan"), "invalid"]})

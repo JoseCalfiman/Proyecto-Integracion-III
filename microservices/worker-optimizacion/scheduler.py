@@ -5,6 +5,7 @@ import os
 import time
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -97,6 +98,20 @@ def run_optimization(buffer: ReadingsBuffer | None = None) -> dict | None:
         return None
 
     future = forecast.iloc[-FORECAST_HORIZON:]
+
+    try:
+        forecast_values = future[["yhat", "yhat_lower", "yhat_upper"]].to_numpy(
+            dtype=float
+        )
+    except (TypeError, ValueError):
+        logger.warning("[scheduler] el pronostico contiene valores no numericos; se omite")
+        return None
+    if not pd.api.types.is_numeric_dtype(future["yhat"]):
+        logger.warning("[scheduler] el pronostico no contiene valores numericos; se omite")
+        return None
+    if not pd.notna(forecast_values).all() or not np.isfinite(forecast_values).all():
+        logger.warning("[scheduler] el pronostico contiene NaN o infinito; se omite")
+        return None
 
     prediction_date = (
         pd.Timestamp(future["ds"].iloc[-1])
