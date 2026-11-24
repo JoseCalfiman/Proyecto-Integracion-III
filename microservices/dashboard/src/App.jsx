@@ -18,7 +18,6 @@ const GerenteHistorial = lazy(() => import('./pages/gerente/Historial'));
 const TecnicoDashboard = lazy(() => import('./pages/tecnico/Dashboard'));
 const TecnicoAlertas = lazy(() => import('./pages/tecnico/Alertas'));
 const TecnicoChatIA = lazy(() => import('./pages/tecnico/ChatIA'));
-const TecnicoHACCP = lazy(() => import('./pages/tecnico/HACCP'));
 const TecnicoPanel = lazy(() => import('./pages/tecnico/PanelTecnico'));
 const TecnicoHistorial = lazy(() => import('./pages/tecnico/Historial'));
 
@@ -94,14 +93,6 @@ const AppRoutes = () => {
         </ProtectedRoute>
       } />
 
-      <Route path="/haccp" element={
-        <ProtectedRoute allowedRoles={['gerente', 'tecnico']}>
-          <Layout>
-            {rol === 'gerente' ? <GerenteHACCP /> : <TecnicoHACCP />}
-          </Layout>
-        </ProtectedRoute>
-      } />
-
       <Route path="/historial" element={
         <ProtectedRoute allowedRoles={['gerente', 'tecnico']}>
           <Layout>
@@ -113,6 +104,12 @@ const AppRoutes = () => {
       {/* ==================================================== */}
       {/* RUTAS EXCLUSIVAS DEL GERENTE */}
       {/* ==================================================== */}
+      <Route path="/haccp" element={
+        <ProtectedRoute allowedRoles={['gerente']}>
+          <Layout><GerenteHACCP /></Layout>
+        </ProtectedRoute>
+      } />
+
       <Route path="/ahorro" element={
         <ProtectedRoute allowedRoles={['gerente']}>
           <Layout><GerenteAhorro /></Layout>

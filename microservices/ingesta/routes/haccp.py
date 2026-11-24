@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth import technician
+from auth import manager
 from database import get_db
 from models import Chamber, HaccpRule
 from schemas import HaccpRuleRead, HaccpRuleUpdate
@@ -86,9 +86,9 @@ def get_rule(id_chamber: UUID, db: Session = Depends(get_db)):
     return _build_read(chamber, _get_rule(db, id_chamber))
 
 
-# Permisos: solo técnico
+# Permisos: solo gerente
 @router.put("/rules/{id_chamber}", response_model=HaccpRuleRead)
-def update_rule(id_chamber: UUID, data: HaccpRuleUpdate, user=Depends(technician), db: Session = Depends(get_db)):
+def update_rule(id_chamber: UUID, data: HaccpRuleUpdate, user=Depends(manager), db: Session = Depends(get_db)):
     """Actualiza la regla de la cámara; si todavía no tiene una, la crea."""
     chamber = _get_chamber_or_404(db, id_chamber)
 

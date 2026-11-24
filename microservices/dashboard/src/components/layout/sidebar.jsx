@@ -28,7 +28,6 @@ const Sidebar = () => {
     { icon: Home, label: 'Monitoreo', path: '/' },
     { icon: AlertTriangle, label: 'Alertas HACCP', path: '/alertas' },
     { icon: MessageSquare, label: 'Asistente IA', path: '/chat-ia' },
-    { icon: ClipboardList, label: 'Reglas HACCP', path: '/haccp' },  // ← Cambiado
     { icon: Wrench, label: 'Panel Técnico', path: '/panel-tecnico' },
     { icon: FileText, label: 'Historial y Reportes', path: '/historial' },
     { icon: Settings, label: 'Configuración', path: '/configuracion' },

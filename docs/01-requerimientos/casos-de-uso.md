@@ -10,8 +10,8 @@
 
 | Actor | Descripción |
 |-------|-------------|
-| Gerente | Consulta indicadores, ahorro y reportes; usa el asistente IA. |
-| Técnico | Revisa alertas, configura cámaras y reglas HACCP. |
+| Gerente | Consulta indicadores, ahorro y reportes; usa el asistente IA y gestiona reglas HACCP. |
+| Técnico | Revisa alertas y configura cámaras. |
 | Administrador | Gestiona usuarios, empresas y roles. |
 | Dispositivo IoT | Publica telemetría (actor secundario/no humano). |
 | Gemini (sistema externo) | Responde consultas en lenguaje natural. |
@@ -38,7 +38,7 @@ flowchart LR
     G --> UC3
     G --> UC4
     T --> UC2
-    T --> UC5
+    G --> UC5
     T --> UC6
     A --> UC7
     IOT --> UC8
@@ -63,7 +63,7 @@ flowchart LR
 - **Actor:** Gerente. **Flujo:** pregunta → contexto del historial → respuesta de Gemini.
 
 ### CU-05 Gestionar reglas HACCP
-- **Actor:** Técnico. **Flujo:** CRUD de `haccp_rules` (umbrales, tolerancia, severidad).
+- **Actor:** Gerente. **Flujo:** CRUD de `haccp_rules` (umbrales, tolerancia, severidad).
 
 ### CU-06 Configurar cámaras
 - **Actor:** Técnico. **Flujo:** CRUD de cámaras y sensores asociados.
