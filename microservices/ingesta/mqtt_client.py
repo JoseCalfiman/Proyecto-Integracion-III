@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from database import SessionLocal
 from kafka_producer import flush as kafka_flush
 from kafka_producer import publish_sensor_data
-from models import Chamber, IngestionLog, SensorData
+from models import Chamber, IngestionLog, Sensor, SensorData
 from schemas import SensorDataCreate
 
 load_dotenv()
@@ -46,9 +46,20 @@ def save_sensor_data(data: dict) -> SensorDataCreate:
 
     db = SessionLocal()
     try:
+      
+        if reading.id_sensor is not None:
+            sensor = db.query(Sensor).filter(Sensor.id_sensor == reading.id_sensor,
+                Sensor.id_chamber == reading.id_chamber).one_or_none()
+            if sensor is None:
+                raise ValueError("id_sensor no pertenece a la cámara")
+        else:
+            candidates = db.query(Sensor).filter(Sensor.id_chamber == reading.id_chamber).limit(2).all()
+            if len(candidates) == 1 and candidates[0].status == "active":
+                reading.id_sensor = candidates[0].id_sensor
         db.add(
             SensorData(
                 id_chamber=reading.id_chamber,
+                **({"id_sensor": reading.id_sensor} if reading.id_sensor is not None else {}),
                 timestamp=reading.timestamp,
                 temperature=reading.temperature,
                 consumption_kw=reading.consumption_kw,
@@ -113,7 +124,7 @@ def procesar_payload(data: dict, raw_payload: str):
 
     try:
         # Publicar los mismos nombres y valores validados que se guardaron.
-        publish_sensor_data(reading.model_dump(mode="json"))
+        publish_sensor_data(reading.model_dump(mode="json", exclude_none=True))
     except Exception as e:
         # La lectura ya está guardada: conservar el fallo para poder recuperarla.
         error_message = f"Lectura guardada; publicación Kafka fallida: {e}"

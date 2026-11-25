@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus, Search, Camera, Check, AlertCircle, Pencil, Trash2, RefreshCw, X } from 'lucide-react';
+import SensoresCamara from '../../components/shared/SensoresCamara';
 import { useFetch } from '../../hooks/useApi';
 import { getCamaras, crearCamara, actualizarCamara, eliminarCamara } from '../../api/camaras';
 
@@ -18,6 +19,9 @@ const Camaras = () => {
   const [mensaje, setMensaje] = useState('');
   const [errorAccion, setErrorAccion] = useState('');
   const [porEliminar, setPorEliminar] = useState(null);
+  const [sensorCamera, setSensorCamera] = useState(null);
+  const sensorPanelRef = useRef(null);
+  useEffect(() => { if (sensorCamera) sensorPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [sensorCamera]);
 
   const lista = Array.isArray(data) ? data : [];
   const activas = lista.filter((c) => c.active).length;
@@ -81,6 +85,7 @@ const Camaras = () => {
     try {
       await eliminarCamara(porEliminar.id, true);
       if (editando?.id === porEliminar.id) resetForm();
+      if (sensorCamera?.id === porEliminar.id) setSensorCamera(null);
       setPorEliminar(null);
       await reload();
       const actualizadas = await getTodas();
@@ -161,6 +166,7 @@ const Camaras = () => {
                   <td className="px-4 py-3 text-gray-600">{c.ubicacion || '—'}</td>
                   <td className="px-4 py-3"><span className={`whitespace-nowrap rounded-full px-2 py-1 text-xs ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{c.active ? 'Activa' : 'Inactiva'}</span></td>
                   <td className="px-4 py-3"><div className="flex flex-wrap gap-2">
+                    <button type="button" disabled={bloqueado} onClick={() => setSensorCamera(c)} className="rounded-md border border-gray-200 px-2 py-1.5 text-xs font-medium">Sensores</button>
                     <button type="button" disabled={bloqueado} onClick={() => handleEditar(c)} className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"><Pencil size={14} /> Editar</button>
                     <button type="button" disabled={bloqueado} onClick={() => setPorEliminar(c)} className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"><Trash2 size={14} /> Eliminar</button>
                   </div></td>
@@ -171,6 +177,7 @@ const Camaras = () => {
           {!loading && !error && <p className="border-t border-gray-100 px-5 py-3 text-xs text-gray-500">Mostrando {visibles.length} de {lista.length} cámaras registradas.</p>}
         </section>
       </div>
+      {sensorCamera && <div ref={sensorPanelRef}><SensoresCamara key={sensorCamera.id} chamberId={sensorCamera.id} chamberName={sensorCamera.nombre} canManage onClose={()=>setSensorCamera(null)} /></div>}
       {porEliminar && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
         <section role="alertdialog" aria-modal="true" aria-labelledby="confirmar-eliminar" aria-describedby="detalle-eliminar" className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
           <div className="flex items-center justify-between"><div className="rounded-lg bg-red-50 p-2 text-red-600"><Trash2 size={24} /></div><button type="button" disabled={busy} aria-label="Cerrar" onClick={() => setPorEliminar(null)} className="text-gray-500 disabled:opacity-50"><X size={20} /></button></div>

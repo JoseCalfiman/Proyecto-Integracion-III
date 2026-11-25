@@ -55,6 +55,9 @@ class Sensor(Base):
     sensor_type = Column(String(50))
     mqtt_identifier = Column(String(100))
     model = Column(String(50))
+    mcu_id = Column(String(50))
+    firmware = Column(String(50))
+    last_calibration = Column(Date)
     status = Column(String(20), default="active")  # active | inactive | maintenance
     installation_date = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -236,3 +239,16 @@ class AiMessage(Base):
         DateTime(timezone=True),
         server_default=func.now(),
     )
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    id_report = Column(BigInteger, primary_key=True, autoincrement=True)
+    id_company = Column(UUID(as_uuid=True), ForeignKey("company.id_company"))
+    id_user = Column(UUID(as_uuid=True), ForeignKey("users.id_user"))
+    report_type = Column(String(50))
+    format = Column(String(20))
+    range_start_date = Column(Date)
+    range_end_date = Column(Date)
+    file_path = Column(String(255))
+    generation_date = Column(DateTime(timezone=True), server_default=func.now())

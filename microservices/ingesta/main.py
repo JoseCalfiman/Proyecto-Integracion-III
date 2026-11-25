@@ -16,6 +16,7 @@ from routes import (
     predictions,
     stats,
     panel,
+    sensors,
 )
 
 from mqtt_client import (
@@ -57,7 +58,7 @@ app.include_router(panel.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 for router in (dashboard.router, haccp.router, alerts.router, chambers.router,
-               gemini.router, optimizacion.router, predictions.router, historial.router, stats.router):
+               gemini.router, optimizacion.router, predictions.router, historial.router, stats.router, sensors.router):
     app.include_router(router, prefix="/api/v1", dependencies=[Depends(shared)])
 
 

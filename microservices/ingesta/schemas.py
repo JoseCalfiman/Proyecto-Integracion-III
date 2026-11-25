@@ -81,6 +81,7 @@ class PredictionRead(BaseModel):
 
 class SensorDataCreate(BaseModel):
     id_chamber: UUID = Field(validation_alias=AliasChoices("id_chamber", "chamber_id"))
+    id_sensor: Optional[int] = Field(default=None, ge=1, strict=True, validation_alias=AliasChoices("id_sensor", "sensor_id"))
     temperature: float = Field(ge=-50, le=50, strict=True, allow_inf_nan=False)
     consumption_kw: float = Field(ge=0, le=999.999, strict=True, allow_inf_nan=False)
     timestamp: AwareDatetime = Field(validation_alias=AliasChoices("timestamp", "recorded_at"))
@@ -185,6 +186,8 @@ class AlertRead(BaseModel):
     acknowledgment_date: Optional[datetime] = None
     id_user_resolved: Optional[UUID] = None
     resolution_date: Optional[datetime] = None
+    acknowledged_by: Optional[str] = None
+    resolved_by: Optional[str] = None
 
 
 class AlertAuditRead(BaseModel):
@@ -196,6 +199,7 @@ class AlertAuditRead(BaseModel):
     action: Optional[str] = None
     detail: Optional[str] = None
     action_date: Optional[datetime] = None
+    user_name: Optional[str] = None
 
 HaccpSeverity = Literal["low", "medium", "high", "critical"]
 

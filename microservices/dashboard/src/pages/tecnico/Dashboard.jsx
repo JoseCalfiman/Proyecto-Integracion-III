@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Camera, AlertTriangle, Activity, Clock, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import MetricCard from '../../components/ui/MetricCard';
+import SensoresCamara from '../../components/shared/SensoresCamara';
 import TemperatureChart from '../../components/charts/TemperatureChart';
 import PredictionDiagnostics from '../../components/shared/PredictionDiagnostics';
 import { getDashboardLive } from '../../api/dashboard';
@@ -81,6 +82,7 @@ const Dashboard = () => {
   const [recarga, setRecarga] = useState(0);
   const [seleccion, setSeleccion] = useState(ALL);
   const [soloRevision, setSoloRevision] = useState(false);
+  const [diagnosticoSensor, setDiagnosticoSensor] = useState(false);
   const [ahora, setAhora] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setAhora(Date.now()), 1000);
@@ -162,6 +164,7 @@ const Dashboard = () => {
         {id === ALL && <p className="text-xs text-gray-500">Selecciona una cámara para ver sus límites HACCP y estadísticas térmicas individuales.</p>}
       </section>
 
+      {id !== ALL && <section className="space-y-3"><button type="button" onClick={()=>setDiagnosticoSensor(v=>!v)} className="rounded-lg border bg-white px-4 py-2 text-sm">{diagnosticoSensor?'Cerrar diagnóstico de sensores':'Diagnóstico individual de sensores'}</button>{diagnosticoSensor&&<SensoresCamara key={id} chamberId={id} chamberName={labels[id]}/>}</section>}
       <PredictionDiagnostics detailed />
 
       <section className="rounded-lg bg-white p-4 shadow-md sm:p-6" aria-label="Estado de sensores">

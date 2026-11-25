@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -15,33 +15,44 @@ router = APIRouter(prefix="/panel", tags=["panel"], dependencies=[Depends(techni
 
 
 @router.get("/gateways", response_model=list[PanelGateway])
-def gateways(db: Session = Depends(get_db)):
+def gateways(db: Session = Depends(get_db), user=Depends(technician)):
     """Una entrada por cámara, incluyendo inactivas; no inventa MCUs."""
-    latest = db.query(SensorData.id_chamber, func.max(SensorData.timestamp).label("last_seen")).group_by(SensorData.id_chamber).subquery()
+    if user.id_company is None:
+        raise HTTPException(403, "Usuario sin empresa")
+    latest = db.query(SensorData.id_chamber, func.max(SensorData.timestamp).label("last_seen")).join(
+        Chamber, Chamber.id_chamber == SensorData.id_chamber).filter(Chamber.id_company == user.id_company).group_by(SensorData.id_chamber).subquery()
     counts = db.query(Sensor.id_chamber, func.count().label("total")).group_by(Sensor.id_chamber).subquery()
     rows = db.query(Chamber, latest.c.last_seen, counts.c.total).outerjoin(
         latest, latest.c.id_chamber == Chamber.id_chamber).outerjoin(
-        counts, counts.c.id_chamber == Chamber.id_chamber).order_by(Chamber.id_chamber).all()
+        counts, counts.c.id_chamber == Chamber.id_chamber).filter(Chamber.id_company == user.id_company).order_by(Chamber.id_chamber).all()
     return [PanelGateway(id=c.id_chamber, nombre=c.name, active=c.active,
                          estado="unknown", ultima_conexion=last_seen,
                          sensores=total or 0) for c, last_seen, total in rows]
 
 
 @router.get("/sensores", response_model=list[PanelSensor])
-def sensors(db: Session = Depends(get_db)):
-    latest = db.query(SensorData.id_sensor, func.max(SensorData.timestamp).label("last_seen")).group_by(SensorData.id_sensor).subquery()
+def sensors(db: Session = Depends(get_db), user=Depends(technician)):
+    if user.id_company is None:
+        raise HTTPException(403, "Usuario sin empresa")
+    # Solo mediciones que tienen sensor asignado; las lecturas de cámara no se replican.
+    latest = db.query(SensorData.id_sensor, func.max(SensorData.timestamp).label("last_seen")).join(
+        Chamber, Chamber.id_chamber == SensorData.id_chamber).filter(Chamber.id_company == user.id_company,
+        SensorData.id_sensor.is_not(None)).group_by(SensorData.id_sensor).subquery()
     rows = db.query(Sensor, Chamber.name, latest.c.last_seen).outerjoin(
         Chamber, Chamber.id_chamber == Sensor.id_chamber).outerjoin(
-        latest, latest.c.id_sensor == Sensor.id_sensor).order_by(Sensor.id_sensor).all()
+        latest, latest.c.id_sensor == Sensor.id_sensor).filter(Chamber.id_company == user.id_company).order_by(Sensor.id_sensor).all()
     return [PanelSensor(id=s.id_sensor, id_chamber=s.id_chamber, ubicacion=name,
                         tipo=s.sensor_type, modelo=s.model, mqtt_identifier=s.mqtt_identifier,
                         estado=s.status, ultima_lectura=last_seen) for s, name, last_seen in rows]
 
 
 @router.get("/alertas", response_model=list[PanelAlert])
-def alerts(db: Session = Depends(get_db)):
-    rows = db.query(GeneratedAlert).order_by(
-        GeneratedAlert.generation_date.desc().nullslast(), GeneratedAlert.id_alert.desc()).all()
+def alerts(db: Session = Depends(get_db), user=Depends(technician), limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    if user.id_company is None:
+        raise HTTPException(403, "Usuario sin empresa")
+    rows = db.query(GeneratedAlert).join(Chamber, Chamber.id_chamber == GeneratedAlert.id_chamber).filter(
+        Chamber.id_company == user.id_company).order_by(
+        GeneratedAlert.generation_date.desc().nullslast(), GeneratedAlert.id_alert.desc()).offset(offset).limit(limit).all()
     return [PanelAlert(id=a.id_alert, id_chamber=a.id_chamber,
                        tipo="critica" if a.severity == "critical" else
                             "advertencia" if a.severity in ("high", "medium") else "info",
