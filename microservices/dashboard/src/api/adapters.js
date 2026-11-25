@@ -43,12 +43,14 @@ export const camaraFromApi = (c) => ({
   sensor_id: "—",
   mcu_id: "—",
   setpoint: "—",
+  active: c.active === true,
   estado: c.active ? "en_linea" : "offline",
 });
 
 export const camaraToApi = (form) => ({
   name: form.nombre,
   location: form.ubicacion || null,
+  ...(typeof form.active === "boolean" ? { active: form.active } : {}),
 });
 
 // ---------- HACCP ----------

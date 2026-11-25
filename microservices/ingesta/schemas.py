@@ -143,7 +143,7 @@ class SensorDataRead(SensorDataCreate):
     sensor_id: Optional[int] = None
 
 class ChamberCreate(BaseModel):
-    id_company: UUID
+    id_company: Optional[UUID] = None
     name: str = Field(min_length=1, max_length=100)
     location: Optional[str] = Field(default=None, max_length=200)
 

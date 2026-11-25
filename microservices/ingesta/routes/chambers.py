@@ -2,6 +2,7 @@ from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from auth import manager
@@ -38,12 +39,28 @@ def get_chamber(id_chamber: UUID, db: Session = Depends(get_db)):
 
 
 # Permisos: solo gerente
-@router.post("", dependencies=[Depends(manager)], response_model=ChamberRead, status_code=status.HTTP_201_CREATED)
-def create_chamber(data: ChamberCreate, db: Session = Depends(get_db)):
-    """Crea una cámara nueva."""
-    chamber = Chamber(**data.model_dump())
-    db.add(chamber)
-    db.commit()
+@router.post("", response_model=ChamberRead, status_code=status.HTTP_201_CREATED)
+def create_chamber(data: ChamberCreate, db: Session = Depends(get_db), user=Depends(manager)):
+    """Registra una cámara activa para la empresa del gerente autenticado."""
+    if user.id_company is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "El gerente no tiene una empresa asociada.")
+    if data.id_company is not None and data.id_company != user.id_company:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "No puedes registrar cámaras de otra empresa.")
+    name = data.name.strip()
+    if not name:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Ingresa un nombre válido para la cámara.")
+    chamber = Chamber(
+        id_company=user.id_company,
+        name=name,
+        location=(data.location or "").strip() or None,
+        active=True,
+    )
+    try:
+        db.add(chamber)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "No se pudo registrar la cámara por un conflicto de datos.") from exc
     db.refresh(chamber)
     return chamber
 
@@ -61,10 +78,25 @@ def update_chamber(id_chamber: UUID, data: ChamberUpdate, db: Session = Depends(
 
 
 # Permisos: solo gerente
-@router.delete("/{id_chamber}", dependencies=[Depends(manager)], status_code=status.HTTP_204_NO_CONTENT)
-def delete_chamber(id_chamber: UUID, db: Session = Depends(get_db)):
-    """Desactiva la cámara (borrado lógico), no elimina el registro."""
+@router.delete("/{id_chamber}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_chamber(
+    id_chamber: UUID, permanent: bool = False,
+    db: Session = Depends(get_db), user=Depends(manager),
+):
+    """Desactiva por defecto; permanent=true elimina el registro y aplica las FK de la BD."""
     chamber = _get_chamber_or_404(db, id_chamber)
-    chamber.active = False
-    db.commit()
+    if permanent and (user.id_company is None or chamber.id_company != user.id_company):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "No puedes eliminar cámaras de otra empresa.")
+    try:
+        if permanent:
+            db.delete(chamber)
+        else:
+            chamber.active = False
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "No se pudo eliminar la cámara: existen registros relacionados que impiden la eliminación.",
+        ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
