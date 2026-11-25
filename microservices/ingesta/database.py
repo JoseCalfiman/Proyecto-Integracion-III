@@ -25,18 +25,30 @@ _engine_lock = threading.Lock()
 Base = declarative_base()
 
 
-def SessionLocal() -> Session:
-    """Crea sesiones a partir de un único engine, inicializado bajo demanda."""
+def get_engine() -> Engine:
+    """Un único pool acotado para API, MQTT y readiness, por proceso."""
     global engine, _session_factory
     if _session_factory is None:
         with _engine_lock:
             if _session_factory is None:
-                engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+                engine = create_engine(
+                    DATABASE_URL,
+                    pool_pre_ping=True,
+                    pool_size=4,
+                    max_overflow=0,
+                    pool_timeout=2,
+                    connect_args={"connect_timeout": 3, "application_name": "cryometric-ingesta"},
+                )
                 _session_factory = sessionmaker(
                     autocommit=False,
                     autoflush=False,
                     bind=engine,
                 )
+    return engine
+
+
+def SessionLocal() -> Session:
+    get_engine()
     return _session_factory()
 
 

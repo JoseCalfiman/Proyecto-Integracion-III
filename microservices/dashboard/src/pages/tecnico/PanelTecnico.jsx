@@ -21,7 +21,6 @@ import {
 } from 'recharts';
 
 import { useFetch } from '../../hooks/useApi';
-import EstadoSistema from '../../components/shared/EstadoSistema';
 import {
   getAlertasSistema,
   getCamarasTecnico,
@@ -244,8 +243,6 @@ const PanelTecnico = () => {
           aria-labelledby="tab-tecnico-general"
           className="space-y-6"
         >
-          {/* Estado del System Controller: se conserva la funcionalidad existente. */}
-          <EstadoSistema />
 
           {/* Integración de Diego: gateways + comprobación de salud. */}
           <section

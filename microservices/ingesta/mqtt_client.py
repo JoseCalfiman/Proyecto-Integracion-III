@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import uuid
 
@@ -12,6 +13,8 @@ from models import Chamber, IngestionLog, Sensor, SensorData
 from schemas import SensorDataCreate
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST")
 
@@ -111,6 +114,17 @@ def log_ingestion(raw_payload: str, status: str, id_chamber=None, error_message:
         db.close()
 
 
+def _safe_log_ingestion(raw_payload: str, status: str, id_chamber=None, **kwargs) -> None:
+    """Una caída de la auditoría no debe terminar el receptor MQTT."""
+    try:
+        log_ingestion(raw_payload, status, id_chamber=id_chamber, **kwargs)
+    except Exception:
+        logger.exception(
+            "No se pudo persistir ingestion_log (estado=%s, cámara=%s); receptor MQTT continúa",
+            status, id_chamber,
+        )
+
+
 def procesar_payload(data: dict, raw_payload: str):
     chamber_id = _extraer_chamber_id(data)
 
@@ -119,7 +133,7 @@ def procesar_payload(data: dict, raw_payload: str):
         print("Lectura guardada en la base de datos")
     except Exception as e:
         print(f"Error guardando lectura: {e}")
-        log_ingestion(raw_payload, "error", id_chamber=chamber_id, error_message=str(e))
+        _safe_log_ingestion(raw_payload, "error", id_chamber=chamber_id, error_message=str(e))
         return  
 
     try:
@@ -129,10 +143,10 @@ def procesar_payload(data: dict, raw_payload: str):
         # La lectura ya está guardada: conservar el fallo para poder recuperarla.
         error_message = f"Lectura guardada; publicación Kafka fallida: {e}"
         print(error_message, flush=True)
-        log_ingestion(raw_payload, "error", id_chamber=chamber_id, error_message=error_message)
+        _safe_log_ingestion(raw_payload, "error", id_chamber=chamber_id, error_message=error_message)
         return
 
-    log_ingestion(raw_payload, "success", id_chamber=chamber_id)
+    _safe_log_ingestion(raw_payload, "success", id_chamber=chamber_id)
 
 
 def on_connect(client, userdata, flags, reason_code, properties=None):
@@ -163,16 +177,21 @@ def on_connect_fail(client, userdata):
 
 def on_message(client, userdata, msg):
     raw_payload = msg.payload.decode("utf-8", errors="replace")
-    print(f"Mensaje recibido en '{msg.topic}': {raw_payload}")
+    print(f"Mensaje recibido en '{msg.topic}': {raw_payload[:1024]}", flush=True)
 
     try:
-        data = json.loads(raw_payload)
-    except json.JSONDecodeError as e:
-        print("Payload no es JSON valido, se descarta")
-        log_ingestion(raw_payload, "error", error_message=f"JSON invalido: {e}")
-        return
+        try:
+            data = json.loads(raw_payload)
+        except json.JSONDecodeError as e:
+            print("Payload no es JSON valido, se descarta", flush=True)
+            _safe_log_ingestion(raw_payload, "error", error_message=f"JSON invalido: {e}")
+            return
 
-    procesar_payload(data, raw_payload)
+        procesar_payload(data, raw_payload)
+    except Exception:
+        # Última barrera: Paho no debe perder su bucle por un mensaje individual.
+        # No reintentar la lectura aquí: podría haber sido confirmada en PostgreSQL.
+        logger.exception("Error inesperado procesando MQTT; receptor continúa")
 
 
 client.on_connect = on_connect
@@ -187,7 +206,10 @@ def start():
     try:
         client.loop_forever(retry_first_connection=True)
     finally:
-        kafka_flush()  
+        try:
+            kafka_flush()
+        except Exception:
+            logger.exception("No se pudo completar el cierre del productor Kafka")
 
 
 if __name__ == "__main__":

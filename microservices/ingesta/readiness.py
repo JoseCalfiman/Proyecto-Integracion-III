@@ -1,44 +1,26 @@
 """Comprobaciones reales y acotadas de las dependencias de ingesta."""
 
-import threading
+import logging
 
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy import text
 
-from database import DATABASE_URL
+from database import get_engine
 from kafka_producer import producer
 
-probe_engine: Engine | None = None
-_probe_engine_lock = threading.Lock()
-
-
-def get_probe_engine() -> Engine:
-    """Construye el engine de readiness la primera vez que se ejecuta el check."""
-    global probe_engine
-    if probe_engine is None:
-        with _probe_engine_lock:
-            if probe_engine is None:
-                probe_engine = create_engine(
-                    DATABASE_URL,
-                    poolclass=NullPool,
-                    connect_args={
-                        "connect_timeout": 2,
-                        "options": "-c statement_timeout=2000",
-                    },
-                )
-    return probe_engine
+logger = logging.getLogger(__name__)
 
 
 def ready():
     checks = {}
     try:
-        engine = probe_engine if probe_engine is not None else get_probe_engine()
-        with engine.connect() as connection:
+        with get_engine().connect() as connection:
+            # SET LOCAL se revierte al devolver la conexión al pool.
+            connection.execute(text("SET LOCAL statement_timeout = '2000ms'"))
             connection.execute(text("SELECT 1"))
         checks["db"] = "ok"
-    except Exception:
+    except Exception as exc:
+        logger.warning("Readiness DB falló (%s)", type(exc).__name__)
         checks["db"] = "error"
 
     try:

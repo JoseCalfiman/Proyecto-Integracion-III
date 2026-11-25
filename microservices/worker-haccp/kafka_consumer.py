@@ -213,7 +213,11 @@ def _validate_anomaly_contract(payload: dict) -> dict:
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
     """Create the PostgreSQL engine from the configured database settings."""
-    return create_engine(get_database_url(), future=True, pool_pre_ping=True)
+    return create_engine(
+        get_database_url(), future=True, pool_pre_ping=True,
+        pool_size=1, max_overflow=0, pool_timeout=5,
+        connect_args={"connect_timeout": 3, "application_name": "cryometric-haccp"},
+    )
 
 
 def _alert_payload_from_message(payload: dict) -> dict:

@@ -9,7 +9,11 @@ DATABASE_URL = (
     f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(
+    DATABASE_URL, pool_pre_ping=True, pool_size=1, max_overflow=0,
+    pool_timeout=5,
+    connect_args={"connect_timeout": 3, "application_name": "cryometric-predictivo"},
+)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
