@@ -1,103 +1,45 @@
-// graficos de temperatura de los ultimos 2 horas, con recharts
-
-import React from "react";
+import React from 'react';
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ReferenceLine,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ReferenceLine, ResponsiveContainer, Legend,
+} from 'recharts';
 
-const COLORS = [
-  "#10b981",
-  "#3b82f6",
-  "#f59e0b",
-  "#8b5cf6",
-  "#ec4899",
-  "#14b8a6",
-];
+const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'];
+const valido = (valor) => typeof valor === 'number' && Number.isFinite(valor);
 
-const SAMPLE = [
-  { time: "-120s", temp: -2.5 },
-  { time: "-90s", temp: -2.3 },
-  { time: "-60s", temp: -2.8 },
-  { time: "-30s", temp: -1.5 },
-  { time: "now", temp: 2.5 },
-];
-
-const TemperatureChart = ({ data, series }) => {
-  const isReal = Array.isArray(data);
-  const chartData = isReal ? data : SAMPLE;
-  const lines = isReal && series?.length ? series : ["temp"];
+// No se generan lecturas de ejemplo. Los intervalos sin medición quedan vacíos.
+const TemperatureChart = ({ data = [], series = [], labels = {}, minTemp, maxTemp, loading = false }) => {
+  const tieneLecturas = data.some((punto) => series.some((key) => valido(punto[key])));
+  const dominio = data.length ? [data[0].timestamp, data[data.length - 1].timestamp] : ['auto', 'auto'];
+  const hora = (ms) => new Date(ms).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-md">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-700">
-          Evolución de Temperatura (Últimas 2h)
-        </h2>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="w-4 h-0.5 bg-red-500"></span>
-          <span className="text-gray-600">Límite (4°C)</span>
+    <section className="min-w-0 rounded-lg bg-white p-4 shadow-md sm:p-6" aria-label="Evolución de temperatura">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-700">Evolución de Temperatura (Últimas 2h)</h2>
+          <p className="mt-1 text-xs text-gray-500">Promedios por intervalos de 2 minutos · °C · Sin interpolación de lecturas ausentes</p>
+        </div>
+        <div className="flex flex-wrap gap-3 text-xs text-gray-600">
+          {valido(maxTemp) && <span className="flex items-center gap-1"><span className="w-4 border-t-2 border-dashed border-red-500" />Máximo HACCP: {maxTemp} °C</span>}
+          {valido(minTemp) && <span className="flex items-center gap-1"><span className="w-4 border-t-2 border-dashed border-blue-500" />Mínimo HACCP: {minTemp} °C</span>}
         </div>
       </div>
-
-      {isReal && chartData.length === 0 ? (
-        <div className="h-[300px] flex items-center justify-center text-sm text-gray-400">
-          Sin lecturas en las últimas 2 horas. ¿Está corriendo el simulador /
-          ESP32?
-        </div>
-      ) : (
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="time" stroke="#9ca3af" minTickGap={30} />
-            <YAxis
-              stroke="#9ca3af"
-              domain={isReal ? ["auto", "auto"] : [-6, 6]}
-              tickFormatter={(v) => `${v}°C`}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#fff",
-                border: "1px solid #e5e7eb",
-                borderRadius: "8px",
-              }}
-              formatter={(value, name) => [
-                `${value}°C`,
-                name === "temp" ? "Temperatura" : name,
-              ]}
-            />
-            {isReal && <Legend />}
-            <ReferenceLine
-              y={4}
-              stroke="#ef4444"
-              strokeDasharray="5 5"
-              strokeWidth={2}
-              ifOverflow="extendDomain"
-            />
-            {lines.map((key, i) => (
-              <Line
-                key={key}
-                type="monotone"
-                dataKey={key}
-                stroke={COLORS[i % COLORS.length]}
-                strokeWidth={3}
-                dot={false}
-                activeDot={{ r: 6 }}
-                connectNulls
-                isAnimationActive={false}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      )}
-    </div>
+      {loading ? <div className="flex h-[300px] items-center justify-center text-sm text-gray-500" role="status">Consultando temperaturas…</div>
+        : !tieneLecturas ? <div className="flex h-[300px] items-center justify-center text-sm text-gray-500">Sin lecturas disponibles para esta selección.</div>
+        : <ResponsiveContainer width="100%" height={320}>
+            <LineChart data={data} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="timestamp" type="number" scale="time" domain={dominio} tickFormatter={hora} stroke="#9ca3af" minTickGap={35} />
+              <YAxis stroke="#9ca3af" domain={['auto', 'auto']} tickFormatter={(v) => `${v}°C`} />
+              <Tooltip labelFormatter={(ms) => new Date(ms).toLocaleString('es-CL')} formatter={(value, name) => [`${Number(value).toLocaleString('es-CL', { maximumFractionDigits: 2 })} °C`, name]} contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} />
+              <Legend />
+              {valido(maxTemp) && <ReferenceLine y={maxTemp} stroke="#ef4444" strokeDasharray="5 5" ifOverflow="extendDomain" />}
+              {valido(minTemp) && <ReferenceLine y={minTemp} stroke="#3b82f6" strokeDasharray="5 5" ifOverflow="extendDomain" />}
+              {series.map((key, i) => <Line key={key} name={labels[key] || key} type="linear" dataKey={key} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 5 }} connectNulls={false} isAnimationActive={false} />)}
+            </LineChart>
+          </ResponsiveContainer>}
+    </section>
   );
 };
 

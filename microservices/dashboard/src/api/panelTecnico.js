@@ -30,8 +30,8 @@ export const getAlertasSistema = () =>
 
 // GET /api/v1/dashboard/temperature: agregados reales de temperatura.
 // No representa RX/TX ni bytes de red; el gráfico debe etiquetarse como temperatura.
-export const getTemperaturasTecnico = () =>
-  obtenerArreglo('/dashboard/temperature', { minutes: 360 }, 'No se pudo consultar la temperatura');
+export const getTemperaturasTecnico = (minutes = 360) =>
+  obtenerArreglo('/dashboard/temperature', { minutes }, 'No se pudo consultar la temperatura');
 
 // D6: inventario físico de sensores. Si el backend aún no publica esta ruta,
 // el Panel muestra error explícito; NUNCA muestra sensores inventados.
