@@ -37,7 +37,7 @@ Este índice es el punto único de entrada. Toda la documentación se referencia
 | 14 | Software Engineering Professional Practice | [`14-practica-profesional/`](14-practica-profesional/) | [Práctica profesional](14-practica-profesional/practica-profesional.md) | Pendiente |
 | 15 | Software Engineering Economics | [`15-economia/`](15-economia/) | [Economía del proyecto](15-economia/economia.md) | Pendiente |
 | 16 | Computing Foundations | [`16-fundamentos-computacion/`](16-fundamentos-computacion/) | [Fundamentos de computación](16-fundamentos-computacion/fundamentos-computacion.md) | Pendiente |
-| 17 | Mathematical Foundations | [`17-fundamentos-matematicos/`](17-fundamentos-matematicos/) | [Fundamentos matemáticos](17-fundamentos-matematicos/fundamentos-matematicos.md) | Pendiente |
+| 17 | Mathematical Foundations | [`17-fundamentos-matematicos/`](17-fundamentos-matematicos/) | [Fundamentos matemáticos](17-fundamentos-matematicos/fundamentos-matematicos.md), [Interpretación estadística del Predictivo](predictivo-estadistica.md) | Borrador |
 | 18 | Engineering Foundations | [`18-fundamentos-ingenieria/`](18-fundamentos-ingenieria/) | [Fundamentos de ingeniería](18-fundamentos-ingenieria/fundamentos-ingenieria.md) | Pendiente |
 
 ---

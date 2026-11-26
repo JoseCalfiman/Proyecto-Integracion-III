@@ -18,7 +18,8 @@ Ajuste por mínimos cuadrados de la temperatura en función del tiempo:
 y = m·x + b        (m = pendiente, b = intercepto)
 ```
 
-La pendiente `m` se obtiene con `sklearn.linear_model.LinearRegression`.
+La pendiente `m` se obtiene con operaciones vectorizadas de NumPy en
+`predictor.calcular_pendiente()`, mediante mínimos cuadrados centrados.
 
 ## 3. Tiempo restante estimado
 
@@ -44,6 +45,10 @@ alerta = (temperatura > max_absoluta) AND (tiempo_restante < tolerancia_min)
 - Cálculo de ahorro: reducción de consumo × `precio_kwh` (CLP).
 
 ## 6. Pendiente
+
+La [guía de interpretación estadística del Predictivo](../predictivo-estadistica.md)
+documenta la implementación actual con NumPy, las convenciones de desviación
+y cuartiles, los ejemplos reproducibles y su relación con el Panel Técnico.
 
 Formalización de errores del modelo, validación estadística y métricas de error
 (MAE/RMSE).
