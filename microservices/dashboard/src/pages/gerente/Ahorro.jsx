@@ -167,7 +167,10 @@ const Ahorro = () => {
   const [exportando, setExportando] = useState(false);
 
   const lista = Array.isArray(recomendaciones) ? recomendaciones : [];
-  const totalAhorro = lista.reduce((acc, r) => acc + (r.monto_clp || 0), 0);
+   const totalAhorro = lista.reduce((acc, r) => {
+     const monto = Number(r.monto_clp);
+     return acc + (Number.isFinite(monto) ? monto : 0);
+   }, 0);
 
   const handleExportar = async (formato) => {
     setExportando(true);
@@ -433,7 +436,9 @@ const Ahorro = () => {
                     </p>
 
                     <p className="text-xl font-bold text-green-600 mt-1">
-                      {r.porcentaje_ahorro ?? 0}%
+                       {Number(r.porcentaje_ahorro ?? 0).toLocaleString('es-CL', {
+                         maximumFractionDigits: 2,
+                       })}%
                     </p>
                   </div>
 
@@ -443,7 +448,7 @@ const Ahorro = () => {
                     </p>
 
                     <p className="text-xl font-bold text-gray-800 mt-1">
-                      {formatCLP(r.monto_clp || 0)}
+                       {formatCLP(Number(r.monto_clp) || 0)}
                     </p>
                   </div>
                 </div>

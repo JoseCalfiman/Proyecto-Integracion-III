@@ -8,7 +8,6 @@ from routes import (
     dashboard,
     gemini,
     haccp,
-    optimization,
     optimizacion,
     predictions,
 )
@@ -42,12 +41,11 @@ app.add_middleware(
 
 # Routers
 app.include_router(dashboard.router, prefix="/api/v1")
-app.include_router(optimization.router, prefix="/api/v1")
+app.include_router(optimizacion.router, prefix="/api/v1")
 app.include_router(haccp.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
 app.include_router(chambers.router, prefix="/api/v1")
 app.include_router(gemini.router, prefix="/api/v1")
-app.include_router(optimizacion.router, prefix="/api/v1")
 app.include_router(predictions.router, prefix="/api/v1")
 
 

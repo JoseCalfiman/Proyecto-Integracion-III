@@ -1,5 +1,5 @@
 import json
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -11,6 +11,11 @@ from models import PredictedConsumption, SavingRecommendation
 from schemas import ConsumptionForecastRead, SavingRecommendationRead
 
 router = APIRouter(prefix="/optimizacion", tags=["optimizacion"])
+
+EQUIPMENT_NAMES = {
+    "camaras_2_y_3": "Cámaras 2 y 3",
+    "eq_climatizacion_zona_b": "Climatización zona B",
+}
 
 
 def _recommendation_is_actionable():
@@ -25,40 +30,58 @@ def _recommendation_is_actionable():
     )
 
 
+def _recommendation_details(record: SavingRecommendation) -> dict[str, Any]:
+    """Adapta el registro persistido al contrato consumido por el dashboard."""
+    rationale: dict[str, Any] = {}
+    try:
+        parsed = json.loads(record.rationale or "{}")
+        if isinstance(parsed, dict):
+            rationale = parsed
+    except (TypeError, json.JSONDecodeError):
+        pass
+
+    equipment = rationale.get("equipment")
+    equipment_name = EQUIPMENT_NAMES.get(equipment, equipment or "equipo")
+    action_code = rationale.get("action_code") or record.action or "optimizar"
+    action = str(action_code).replace("_", " ")
+    title = rationale.get("title") or record.action
+    if not title:
+        title = f"{action.capitalize()} {equipment_name}"
+
+    return {
+        "id": record.id_recommendation,
+        "id_chamber": record.id_chamber,
+        "titulo": title,
+        "descripcion": record.rationale,
+        "prioridad": rationale.get("priority", "media"),
+        "porcentaje_ahorro": (
+            float(record.expected_saving_pct)
+            if record.expected_saving_pct is not None else None
+        ),
+        "monto_clp": (
+            float(record.expected_saving_amount)
+            if record.expected_saving_amount is not None else None
+        ),
+        "icono": "thermometer" if "climatizacion" in str(equipment) else "snowflake",
+        "status": record.status,
+        "created_at": record.created_at,
+    }
+
+
 @router.get("/recommendations", response_model=List[SavingRecommendationRead])
 def recommendations(id_chamber: Optional[UUID] = None, db: Session = Depends(get_db)):
-    """Ahorros pendientes, más recientes primero; opcionalmente de una cámara."""
+    """Devuelve recomendaciones pendientes con ahorro o justificación explícita."""
+    actionable = _recommendation_is_actionable()
     query = db.query(SavingRecommendation).filter(
         SavingRecommendation.status == "pending",
-        _recommendation_is_actionable(),
+        actionable,
     )
     if id_chamber is not None:
         query = query.filter(SavingRecommendation.id_chamber == id_chamber)
     rows = query.order_by(
-        SavingRecommendation.created_at.desc(), SavingRecommendation.id_recommendation.desc()
+        SavingRecommendation.id_recommendation.desc()
     ).all()
-    recommendations = []
-    for row in rows:
-        metadata = {}
-        try:
-            parsed = json.loads(row.rationale or "{}")
-            if isinstance(parsed, dict):
-                metadata = parsed
-        except (TypeError, json.JSONDecodeError):
-            pass
-        recommendations.append(
-            SavingRecommendationRead(
-                id=row.id_recommendation,
-                id_chamber=row.id_chamber,
-                titulo=metadata.get("title") or row.action,
-                descripcion=row.rationale,
-                porcentaje_ahorro=row.expected_saving_pct,
-                monto_clp=row.expected_saving_amount,
-                status=row.status,
-                created_at=row.created_at,
-            )
-        )
-    return recommendations
+    return [SavingRecommendationRead.model_validate(_recommendation_details(row)) for row in rows]
 
 
 @router.get("/forecast", response_model=List[ConsumptionForecastRead])
