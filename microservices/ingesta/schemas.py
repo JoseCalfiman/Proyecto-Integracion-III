@@ -22,6 +22,10 @@ class SavingRecommendationRead(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class SavingRecommendationStatusUpdate(BaseModel):
+    status: Literal["applied", "discarded", "expired"]
+
+
 class ConsumptionForecastRead(BaseModel):
     date: date
     pronostico: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)

@@ -469,6 +469,20 @@ def save_report(report: dict[str, Any]) -> bool:
 
             cur.execute(
                 """
+                UPDATE saving_recommendation
+                SET status = 'expired'
+                WHERE id_chamber = %s
+                  AND status = 'pending'
+                  AND COALESCE(rationale, '') NOT LIKE %s
+                """,
+                (
+                    chamber_uuid,
+                    f'%"target_date": "{str(target_date)}"%',
+                ),
+            )
+
+            cur.execute(
+                """
                 DELETE FROM saving_recommendation
                 WHERE status = 'pending'
                   AND (

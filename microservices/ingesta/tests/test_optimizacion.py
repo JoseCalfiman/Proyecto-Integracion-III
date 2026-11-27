@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from models import PredictedConsumption, SavingRecommendation
-from routes.optimizacion import forecast, recommendations, router
+from routes.optimizacion import (
+    forecast,
+    recommendations,
+    router,
+    update_recommendation_status,
+)
+from schemas import SavingRecommendationStatusUpdate
 
 
 class OptimizationTests(unittest.TestCase):
@@ -76,8 +82,35 @@ class OptimizationTests(unittest.TestCase):
 
     def test_get_route_names(self):
         self.assertEqual({r.path for r in router.routes}, {
-            '/optimizacion/recommendations', '/optimizacion/forecast'})
-        self.assertTrue(all(r.methods == {'GET'} for r in router.routes))
+            '/optimizacion/recommendations',
+            '/optimizacion/forecast',
+            '/optimizacion/recommendations/{id_recommendation}/status',
+        })
+        self.assertEqual(
+            next(r for r in router.routes if r.path.endswith('/status')).methods,
+            {'PATCH'},
+        )
+
+    def test_status_transition_is_persisted_and_removed_from_pending_api(self):
+        self.db.add(SavingRecommendation(
+            id_recommendation=10,
+            status='pending',
+            action='apagar',
+            expected_saving_pct=Decimal('10'),
+            expected_saving_amount=Decimal('1000'),
+        ))
+        self.db.commit()
+
+        result = update_recommendation_status(
+            10,
+            SavingRecommendationStatusUpdate(status='applied'),
+            self.db,
+        )
+
+        self.assertEqual(result.status, 'applied')
+        self.assertIsNotNone(result.created_at)
+        self.assertEqual(self.db.get(SavingRecommendation, 10).status, 'applied')
+        self.assertEqual(recommendations(db=self.db), [])
 
 
 if __name__ == '__main__':

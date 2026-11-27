@@ -1,14 +1,19 @@
 import json
+from datetime import datetime, timezone
 from typing import Any, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models import PredictedConsumption, SavingRecommendation
-from schemas import ConsumptionForecastRead, SavingRecommendationRead
+from schemas import (
+    ConsumptionForecastRead,
+    SavingRecommendationRead,
+    SavingRecommendationStatusUpdate,
+)
 
 router = APIRouter(prefix="/optimizacion", tags=["optimizacion"])
 
@@ -82,6 +87,34 @@ def recommendations(id_chamber: Optional[UUID] = None, db: Session = Depends(get
         SavingRecommendation.id_recommendation.desc()
     ).all()
     return [SavingRecommendationRead.model_validate(_recommendation_details(row)) for row in rows]
+
+
+@router.patch(
+    "/recommendations/{id_recommendation}/status",
+    response_model=SavingRecommendationRead,
+)
+def update_recommendation_status(
+    id_recommendation: int,
+    data: SavingRecommendationStatusUpdate,
+    db: Session = Depends(get_db),
+):
+    """Persiste el cierre de una recomendación pendiente."""
+    recommendation = db.get(SavingRecommendation, id_recommendation)
+    if recommendation is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Recomendación no encontrada")
+    if recommendation.status != "pending":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"La recomendación debe estar en estado 'pending' (estado actual: '{recommendation.status}')",
+        )
+
+    recommendation.status = data.status
+    recommendation.applied_at = (
+        datetime.now(timezone.utc) if data.status == "applied" else None
+    )
+    db.commit()
+    db.refresh(recommendation)
+    return SavingRecommendationRead.model_validate(_recommendation_details(recommendation))
 
 
 @router.get("/forecast", response_model=List[ConsumptionForecastRead])
