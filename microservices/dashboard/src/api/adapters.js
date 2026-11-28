@@ -54,28 +54,42 @@ export const camaraToApi = (form) => ({
 });
 
 // ---------- HACCP ----------
+// Mapeo uno a uno con los 4 niveles del backend.
 const SEV_HACCP_FRONT = {
-  critical: "critico",
-  high: "critico",
-  medium: "medio",
   low: "bajo",
+  medium: "medio",
+  high: "alto",
+  critical: "critico",
 };
-const SEV_HACCP_BACK = { critico: "critical", medio: "medium", bajo: "low" };
+const SEV_HACCP_BACK = { bajo: "low", medio: "medium", alto: "high", critico: "critical" };
 
+export const SEVERIDADES_HACCP = Object.keys(SEV_HACCP_BACK);
+
+// Si el backend envía una severidad desconocida, `severidad` queda en null y
+// `severidad_api` conserva el valor recibido para mostrarlo como inválido.
 export const reglaFromApi = (r) => ({
   camara_id: r.id_chamber,
   camara: r.chamber_name,
+  id_rule: r.id_rule ?? null,
+  has_rule: r.has_rule !== false,
   temp_max: Number(r.max_absolute_temp),
   temp_min: Number(r.min_absolute_temp),
   tiempo_tolerancia: r.tolerance_time_min,
-  severidad: SEV_HACCP_FRONT[r.severity] || "medio",
-  activa: r.active,
+  severidad: SEV_HACCP_FRONT[r.severity] ?? null,
+  severidad_api: r.severity ?? null,
+  activa: Boolean(r.active),
+  review_date: r.review_date ?? null,
+  modified_by_name: r.modified_by_name ?? null,
 });
 
-export const reglaToApi = (form) => ({
-  max_absolute_temp: form.temp_max,
-  min_absolute_temp: form.temp_min,
-  tolerance_time_min: form.tiempo_tolerancia,
-  severity: SEV_HACCP_BACK[form.severidad] || "medium",
-  active: form.activa,
-});
+export const reglaToApi = (form) => {
+  const severity = SEV_HACCP_BACK[form.severidad];
+  if (!severity) throw new Error("Selecciona un nivel de severidad válido");
+  return {
+    max_absolute_temp: form.temp_max,
+    min_absolute_temp: form.temp_min,
+    tolerance_time_min: form.tiempo_tolerancia,
+    severity,
+    active: form.activa,
+  };
+};
