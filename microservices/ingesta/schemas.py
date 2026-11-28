@@ -231,6 +231,9 @@ class HaccpRuleRead(BaseModel):
     active: bool
     review_date: Optional[datetime] = None
     id_user_modified: Optional[UUID] = None
+    # False: la cámara no tiene regla; los valores son solo sugerencias y no se monitorea.
+    has_rule: bool = True
+    modified_by_name: Optional[str] = None
 
 class GeminiChatRequest(BaseModel):
     pregunta: str = Field(

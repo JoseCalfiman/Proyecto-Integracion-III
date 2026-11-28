@@ -2,7 +2,16 @@
 import apiClient from './client';
 import { reglaFromApi, reglaToApi } from './adapters';
 
-const msg = (error, fallback) => error.response?.data?.detail || fallback;
+// FastAPI devuelve `detail` como string (404/403) o como lista de objetos con .msg (422).
+const msg = (error, fallback) => {
+  const detail = error.response?.data?.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (Array.isArray(detail)) {
+    const text = detail.map((item) => item?.msg).filter(Boolean).join('; ');
+    if (text) return text;
+  }
+  return error.response ? fallback : (error.message || fallback);
+};
 
 export const getReglasHaccp = async () => {
   try {
@@ -23,8 +32,9 @@ export const getReglasPorCamara = async (camaraId) => {
 };
 
 export const actualizarReglasPorCamara = async (camaraId, form) => {
+  const body = reglaToApi(form);
   try {
-    const { data } = await apiClient.put(`/haccp/rules/${camaraId}`, reglaToApi(form));
+    const { data } = await apiClient.put(`/haccp/rules/${camaraId}`, body);
     return reglaFromApi(data);
   } catch (error) {
     throw new Error(msg(error, 'Error al actualizar las reglas de la cámara'));
